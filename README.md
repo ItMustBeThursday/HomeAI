@@ -20,6 +20,18 @@ Open a **new** dashboard chat after installation. `/status` shows the actual mod
 
 Hosted prompts and chat/system context may be sent without a separate confirmation, as authorized. Other external actions still require approval; project deletion requires verified backup. This stage exposes only local memory/history tools. Shell and computer/browser actions remain disabled. It connects the OpenClaw chat interface to the coding clients, but does **not** yet implement autonomous coding, document/image generation, voice or hardware control.
 
+## Repair the initial Codex policy error
+
+If the dashboard says Codex local execution is unavailable because `tools.exec.mode=deny`, update this repository and run from `home-ai-kit`:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\Repair-HomeAIChatPolicy.ps1
+```
+
+The repair stops owned services, verifies a backup, changes requested and host policy to the human-approval `cautious` preset, and restarts HomeAI. It retains existing model routes, the finite memory/history tool list, and the read-only Codex sandbox. It does not reinstall clients or repeat account login. The previous deny-all policy also blocked Codex runtime admission checks.
+
+Claude is normally a fallback, rather than a separate chat window. To test it, send `/model anthropic/claude-opus-5-5`, then a short prompt and `/status`. Confirm the actual runtime is Claude Code, because a fallback may answer instead. Restore Codex with `/model openai/gpt-6-astra`.
+
 ## Separate prompt helpers
 
 `Connect-Codex.ps1` and `Connect-Claude.ps1` also support standalone PowerShell prompt workers. The standalone Codex connector discovers the installed executable and uses a private profile; it is separate from the official OpenClaw harness.
@@ -53,4 +65,5 @@ node tests\test-native.mjs
 References: [Claude CLI backend](https://docs.openclaw.ai/gateway/cli-backends), [Codex harness](https://docs.openclaw.ai/plugins/codex-harness), [Harness configuration](https://docs.openclaw.ai/plugins/codex-harness/configuration).
 
 Only generic source is published. Credentials, runtime state, personal proposals, model files, backups and test artifacts are excluded.
+
 

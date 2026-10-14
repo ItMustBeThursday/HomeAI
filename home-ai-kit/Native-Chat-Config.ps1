@@ -24,7 +24,10 @@ function Enable-HomeAINativeChatConfig($Config,$Settings,[string]$Primary='Codex
     # Profile narrowing alone is insufficient for the native Codex harness.
     $Config.tools.PSObject.Properties.Remove('alsoAllow')
     $Config.tools | Add-Member -NotePropertyName allow -NotePropertyValue @('memory_search','memory_get','sessions_history') -Force
-    $Config.tools | Add-Member -NotePropertyName exec -NotePropertyValue @{host='gateway';mode='deny'} -Force
+    # deny/allowlist also block Codex app-server runtime admission. Use the
+    # human approval route while the finite tool list and read-only sandbox
+    # continue to restrict what the native client may do.
+    $Config.tools | Add-Member -NotePropertyName exec -NotePropertyValue @{host='gateway';mode='ask'} -Force
     if(-not $Config.PSObject.Properties['plugins']){$Config | Add-Member -NotePropertyName plugins -NotePropertyValue ([pscustomobject]@{})}
     $entries=@{}
     if($Config.plugins.PSObject.Properties['entries']){foreach($p in $Config.plugins.entries.PSObject.Properties){$entries[$p.Name]=$p.Value}}

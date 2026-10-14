@@ -60,7 +60,7 @@ foreach($file in Get-ChildItem -LiteralPath $PSScriptRoot -File) {
     if($target -ne $file.FullName){Copy-Item -LiteralPath $file.FullName -Destination $target -Force}
 }
 Invoke-HomeAINative $node @($claw,'config','validate')
-Invoke-HomeAINative $node @($claw,'exec-policy','preset','deny-all')
+Invoke-HomeAINative $node @($claw,'exec-policy','preset','cautious')
 foreach($pluginId in @('codex','anthropic')) {
     $inspectionText=& $node $claw plugins inspect $pluginId --runtime --json
     if($LASTEXITCODE -ne 0){throw "Runtime inspection failed for $pluginId. The gateway remains stopped."}
