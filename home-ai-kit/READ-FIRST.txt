@@ -1,0 +1,20 @@
+HOMEAI - OPENCLAW SUBSCRIPTION CHAT
+
+Existing gaming-PC installation:
+1. Extract this ZIP and keep the helper files together.
+2. Open Windows PowerShell in the extracted folder.
+3. Run:
+   powershell -NoProfile -ExecutionPolicy Bypass -File .\Connect-OpenClawChat.ps1
+4. Complete Claude Code/ChatGPT sign-in when prompted.
+5. Open a NEW dashboard chat and use /status to check its actual model/runtime.
+   /codex status reports native Codex account limits.
+
+This installs the official Codex plugin and enables bundled Claude Code.
+Default preference: Codex, Claude Code, local Qwen. -Primary Claude reverses
+hosted preference. -Primary Qwen selects local-only defaults.
+No full setup rerun or model redownload is needed.
+
+Read README.md for tested boundaries and later stages. This package connects
+chat; autonomous coding, desktop control, documents/images and voice are not
+implemented yet. Claude Desktop login alone is insufficient: complete the
+native Claude Code sign-in. No API key or API billing fallback is configured.

@@ -69,6 +69,21 @@ function Set-HomeAIEnvironment($Settings) {
     $env:DO_NOT_TRACK = '1'
     $env:PATH = (Join-Path $Settings.root "runtime\node-v$($Settings.nodeVersion)-win-x64") + ';' +
         (Join-Path $Settings.root 'runtime\git\cmd') + ';' + $env:PATH
+    $chatMarker=Join-Path $Settings.root 'state\openclaw-chat-connector.json'
+    if(Test-Path -LiteralPath $chatMarker) {
+        $chat=Get-Content -LiteralPath $chatMarker -Raw | ConvertFrom-Json
+        if($chat.owner -eq 'home-ai-native-chat-v1') {
+            $exe=Assert-HomeAIChild $chat.claudeExecutable $Settings.root
+            if((Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash -ne $chat.claudeExecutableSha256){throw 'Claude executable changed; reconnect before starting native chat.'}
+            $env:CLAUDE_CONFIG_DIR=Join-Path $env:LOCALAPPDATA 'HomeAI-Claude'
+            $env:PATH=(Split-Path $exe -Parent)+';'+$env:PATH
+            $env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC='1';$env:DISABLE_AUTOUPDATER='1'
+            foreach($name in @('OPENAI_API_KEY','CODEX_API_KEY','OPENAI_BASE_URL','ANTHROPIC_API_KEY','ANTHROPIC_AUTH_TOKEN',
+                'ANTHROPIC_BASE_URL','CLAUDE_CODE_OAUTH_TOKEN','CLAUDE_CODE_USE_BEDROCK','CLAUDE_CODE_USE_VERTEX','CLAUDE_CODE_USE_FOUNDRY')) {
+                [Environment]::SetEnvironmentVariable($name,$null,'Process')
+            }
+        }
+    }
 }
 
 function Invoke-HomeAINative([string]$Exe, [string[]]$Arguments) {
@@ -77,13 +92,24 @@ function Invoke-HomeAINative([string]$Exe, [string[]]$Arguments) {
 }
 
 function Get-HomeAIOllama($Settings, [string]$Route) {
-    Invoke-RestMethod -Uri "http://127.0.0.1:$($Settings.ollamaPort)$Route" -TimeoutSec 15
+    $response=Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$($Settings.ollamaPort)$Route" -TimeoutSec 15
+    ConvertFrom-HomeAIUtf8Response $response
 }
 
 function Send-HomeAIOllama($Settings, [string]$Route, $Body, [int]$Timeout = 900) {
-    Invoke-RestMethod -Uri "http://127.0.0.1:$($Settings.ollamaPort)$Route" -Method Post `
-        -ContentType 'application/json' -Body ([Text.Encoding]::UTF8.GetBytes(($Body | ConvertTo-Json -Depth 30))) `
+    $response=Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$($Settings.ollamaPort)$Route" -Method Post `
+        -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes(($Body | ConvertTo-Json -Depth 30))) `
         -TimeoutSec $Timeout
+    ConvertFrom-HomeAIUtf8Response $response
+}
+
+function ConvertFrom-HomeAIUtf8Response($Response) {
+    # JSON is UTF-8 even when the server omits a charset. PowerShell 5.1's
+    # default HTTP string decoder can otherwise corrupt accented text.
+    $stream=$Response.RawContentStream
+    if($stream.CanSeek){$stream.Position=0}
+    $reader=[IO.StreamReader]::new($stream,[Text.Encoding]::UTF8,$true,4096,$true)
+    try {return ($reader.ReadToEnd() | ConvertFrom-Json)} finally {$reader.Dispose()}
 }
 
 function Get-HomeAIOpenClaw($Settings) {

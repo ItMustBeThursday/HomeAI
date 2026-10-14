@@ -1,52 +1,12 @@
-CODEX SUBSCRIPTION CONNECTOR - October 14, 2026
+CODEX
 
-Implemented: Connect-Codex.ps1 discovers the installed native codex.exe,
-checks required CLI flags and disabled capabilities, backs up HomeAI, registers
-the executable's SHA-256, and signs into ChatGPT in a private HomeAI profile.
-Desktop configuration and existing conversations are not copied or modified.
-No OpenAI API key, model download, global installation, or inference is needed.
+For OpenClaw chat, run Connect-OpenClawChat.ps1 (see READ-FIRST.txt).
+It installs official @openclaw/codex 2026.10.3, which uses its managed native
+Codex app-server client. Complete the native ChatGPT account login. It does
+not control the desktop window or use an API key. Use /status and /codex status
+in a new chat to check runtime and limits.
 
-Run in the new extracted package folder:
-  powershell -NoProfile -ExecutionPolicy Bypass -File .\Connect-Codex.ps1
-
-If discovery cannot find your official runtime, supply -CodexPath with its
-absolute codex.exe path. The script does not download an arbitrary replacement.
-A desktop update can change the executable; reconnect to validate it again.
-
-Use:
-  powershell -NoProfile -ExecutionPolicy Bypass -File D:\HomeAI\scripts\Ask-HomeAI.ps1 -Mode BestAvailable -Provider Codex -Prompt "Draft a short project brief"
-
-Codex is the default hosted preference. Use -Provider Claude to reverse order.
-Routing tries the preference, then the other connected hosted worker, then Qwen.
-Actual usage-limit errors cause a persisted five-minute retry cooldown. This is
-not a quota-reset prediction or a remaining-token meter. Failed/unavailable
-connectors also fall through, with at most one attempt per hosted worker.
-A successful reply discussing limits does not count as a quota failure.
-
-UPDATED PERMISSION: the user authorized outbound inference prompts without a
-SEND confirmation. This applies to the prompt supplied to the helper. The bridge
-does not attach desktop chats, local memory, repository files or project history.
-Messaging, publishing, purchases, arbitrary uploads and external tool actions
-remain approval-gated. Project deletion still requires a verified backup.
-
-Codex requests use a private profile, ignore user config and rules, omit AGENTS
-content, disable command execution, browser/computer/image tools, apps, plugins,
-hooks and delegation, and use a read-only sandbox that denies escalation.
-The text helper returns generated code as text; it does not execute or apply it.
-No code/repository tools, durable multi-step continuation, shared hosted/local
-conversation, or Codex model selector in OpenClaw is implemented by this step.
-Qwen and the OpenClaw dashboard stay local by default.
-
-Authentication lives under LOCALAPPDATA\HomeAI-Codex outside project backups.
-Do not publish this profile or copy auth.json into the repository. Re-login when
-restoring onto another PC. Account access and usage limits still apply; no
-additional-credit purchase or API billing fallback is configured.
-
-Sources:
-https://learn.chatgpt.com/docs/auth
-https://learn.chatgpt.com/docs/non-interactive-mode
-https://learn.chatgpt.com/docs/config-file/config-reference
-
-Validation: actual installed Codex feature configuration checked without login
-or inference; mock limit routing, auth refusal, UTF-8 stdin and timeout checks.
-The gaming PC's native login and first real Codex request require testing there.
+Connect-Codex.ps1 independently connects the installed native executable to
+Ask-HomeAI.ps1's standalone prompt worker. That private profile is separate
+from OpenClaw's native Codex account profile. Desktop login alone does not
+establish either connector's profile.

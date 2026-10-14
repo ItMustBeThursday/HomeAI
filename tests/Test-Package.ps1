@@ -59,6 +59,12 @@ function Invoke-RestMethod {
     }
     return [pscustomobject]@{message=[pscustomobject]@{role='assistant';content='mock local answer'};eval_count=10;eval_duration=1000000000}
 }
+function Invoke-WebRequest {
+    param($Uri,$Method,$ContentType,$Body,$TimeoutSec,[switch]$UseBasicParsing)
+    $result=Invoke-RestMethod -Uri $Uri -Method $Method -ContentType $ContentType -Body $Body -TimeoutSec $TimeoutSec
+    $bytes=[Text.Encoding]::UTF8.GetBytes(($result | ConvertTo-Json -Depth 30))
+    return [pscustomobject]@{RawContentStream=[IO.MemoryStream]::new($bytes,$false)}
+}
 & (Join-Path $kit 'Invoke-HomeAI.ps1') -Root $testRoot -Task quick -Prompt 'Hello' | Out-Null
 Assert ($global:HomeAIHarness.lastBody.model -eq 'homeai-fast:locked') 'Optional quick worker selected'
 & (Join-Path $kit 'Invoke-HomeAI.ps1') -Root $testRoot -Task auto -Prompt 'Debug the function' | Out-Null

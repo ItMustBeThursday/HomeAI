@@ -1,0 +1,31 @@
+{
+  "chat": {
+    "status": "ready-for-target-validation",
+    "fallbacks": [
+      "Claude Code",
+      "local Qwen"
+    ],
+    "primary": "Codex",
+    "installer": "Connect-OpenClawChat.ps1"
+  },
+  "coding": {
+    "source": "https://github.com/scotthuang/agent-knock-knock",
+    "preferredConnector": "agent-knock-knock",
+    "nextChecks": [
+      "Evaluate WSL/Linux terminal deployment without changing the working Radeon Ollama server",
+      "Verify exact coding-client versions and conversation capabilities",
+      "Preserve human approval for external actions; back up before project deletion",
+      "Test send, completion callback, restart recovery and quota handling before autonomous continuation"
+    ],
+    "reason": "Documented runtime is macOS/Linux; exact Desktop/direct-Claude profiles are macOS. Native Windows control is unverified.",
+    "status": "queued-compatibility-evaluation"
+  },
+  "schemaVersion": 1,
+  "deferred": [
+    "professional document workers",
+    "image generation",
+    "voice",
+    "assistive hardware"
+  ],
+  "autonomousContinuationImplemented": false
+}

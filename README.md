@@ -1,94 +1,56 @@
 # HomeAI
 
-A staged Windows home AI kit: local Qwen through Ollama and restricted OpenClaw,
-plus optional Codex and Claude subscription text workers.
+Windows home AI: local Qwen through Ollama, OpenClaw chat, and optional subscription-backed Codex and Claude Code runtimes.
 
-## Existing HomeAI installation
+## Add subscriptions to existing OpenClaw chat
 
-Download the source ZIP from GitHub and extract it on the gaming PC. Open Windows
-PowerShell in `home-ai-kit`. Keep all helper files together.
-
-Connect the installed Codex runtime:
+On the gaming PC, extract the installer ZIP and keep its helper files together. From that folder (or `home-ai-kit` in a GitHub source download), run:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\Connect-Codex.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\Connect-OpenClawChat.ps1
 ```
 
-Complete the native ChatGPT login if asked. The connector uses a private HomeAI
-profile and does not copy desktop credentials, settings or conversations. It
-discovers the official installed native executable; if necessary, supply its
-absolute path with `-CodexPath`. No API key or API billing fallback is configured.
+Requires the existing `D:\HomeAI` foundation with OpenClaw 2026.10.3. The installer stops this kit's services, verifies a backup, installs the pinned official `@openclaw/codex` plugin through OpenClaw's installer, and enables the bundled Anthropic `claude-cli` backend. Missing Claude Code is installed by the included connector. Complete native Claude Pro and ChatGPT sign-in when prompted. Claude Desktop login alone is insufficient. Confirm Claude paid extra usage is disabled when asked.
 
-Optional Claude Pro connector:
+The Codex plugin uses its managed native client and OpenClaw account profile; it does not control the Codex Desktop window. Claude Code uses a private HomeAI profile. No API key or paid API fallback is configured. The existing Qwen model is retained without downloading it again.
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\Connect-Claude.ps1
-```
+Default preference: Codex, Claude Code, local Qwen. OpenClaw handles eligible failures and usage-limit cooldowns through native fallback. Use `-Primary Claude` to reverse hosted preference or `-Primary Qwen` for local-only defaults. Fallback can take time and is not guaranteed for every native error.
 
-Complete native subscription login and confirm paid extra usage is disabled in
-Claude billing. The installer reuses the pinned downloaded package on reruns.
+Open a **new** dashboard chat after installation. `/status` shows the actual model/runtime; `/codex status` reports native Codex account limits. The installer requests a real READY reply, but a Qwen fallback does not prove hosted authentication succeeded. Check its runtime. Live hosted authentication must be verified on the gaming PC.
 
-Request with automatic fallback:
+Hosted prompts and chat/system context may be sent without a separate confirmation, as authorized. Other external actions still require approval; project deletion requires verified backup. This stage exposes only local memory/history tools. Shell and computer/browser actions remain disabled. It connects the OpenClaw chat interface to the coding clients, but does **not** yet implement autonomous coding, document/image generation, voice or hardware control.
+
+## Separate prompt helpers
+
+`Connect-Codex.ps1` and `Connect-Claude.ps1` also support standalone PowerShell prompt workers. The standalone Codex connector discovers the installed executable and uses a private profile; it is separate from the official OpenClaw harness.
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File D:\HomeAI\scripts\Ask-HomeAI.ps1 -Mode BestAvailable -Provider Codex -Prompt "Draft a short project brief."
 ```
 
-Order: Codex, Claude, local Qwen. Use `-Provider Claude` to reverse hosted
-preference. Omit `-Mode BestAvailable` for local-only inference. Missing login,
-failed/incomplete requests and observed usage limits move to the next worker.
-An observed limit produces a persisted five-minute retry cooldown; this is not
-a predicted quota reset or remaining-token balance. Each hosted worker is tried
-at most once per request. Quota classification ignores successful answer text.
+This helper tries the preferred hosted worker, the other worker, then Qwen. It sends only the supplied prompt and performs no project actions. Its observed quota cooldown is five minutes, not a predicted token balance/reset. Omit `-Mode BestAvailable` for local-only inference.
 
-Hosted inference prompts are authorized without a SEND confirmation. Only the
-supplied prompt is passed as task content: project files, memory and previous
-desktop conversations are not attached. These text workers do not execute code,
-send messages, publish, buy anything or modify project files. Other external
-actions still require approval; project deletion requires a verified backup.
+## Foundation and later stages
 
-**Current boundary:** the hosted bridge is a PowerShell interface. It does not
-add Codex or Claude to OpenClaw's model selector, share persistent conversations,
-or implement autonomous project tools. OpenClaw remains local. A shared task
-ledger, policy broker, document/image workers, voice and assistive hardware work
-remain future stages. No frontier-level local performance is promised.
+For a new foundation, inspect `Setup-HomeAI.ps1 -PlanOnly`. Defaults: `D:\HomeAI`, backups `E:\HomeAI-Backups`, Ollama port 11435, gateway port 18795. `Continue-HomeAI.ps1` checks dependencies, starts local chat and evaluates models; it does not install every later stage.
 
-## New installation
+Later stages need a durable task ledger and action policy broker before project-writing workers and autonomous continuation. The preferred next-stage connector is [Agent Knock Knock](https://github.com/scotthuang/agent-knock-knock), following the user recommendation. It controls existing coding conversations and callbacks. Its documented runtime is macOS/Linux; Windows Desktop control is not verified, so a compatible Linux/WSL terminal arrangement must be evaluated before installation. It is not installed by this chat package. Document/image tools, voice and assistive hardware remain later work.
 
-Review `home-ai-kit/releases.json` and `Setup-HomeAI.ps1 -PlanOnly`, then run setup.
-Defaults: install `D:\HomeAI`, backup `E:\HomeAI-Backups`, Ollama port 11435,
-OpenClaw port 18795. Installation downloads portable runtimes and a large Qwen
-model. `Continue-HomeAI.ps1` performs dependency checks and model evaluations.
-The installer pins release hashes and leaves shell/browser/device tools disabled.
+## Validation
 
-## Verification
+Offline Windows PowerShell tests cover parsing/configuration, backup links, native process transport, Claude package lock parsing, standalone fallback and native chat configuration. Native chat configuration passed the actual pinned OpenClaw core and official Codex plugin schemas. Development inspection loaded the Codex package but correctly rejected privileged registrations without official installation provenance; the installer therefore uses the official package installer.
 
-With Node available on PATH, run these from the repository root on Windows:
+Native subscription login, installed-plugin provenance, hosted replies, cross-provider conversation continuity and GPU behavior require target-PC verification. Live hosted accounts were not tested on this development computer.
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File tests\Test-Package.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File tests\Test-ClaudeLock.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File tests\Test-CodexRouting.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File tests\Test-NativeChatConfig.ps1
 node tests\test-native.mjs
 ```
 
-`Test-CodexRuntime.ps1` additionally needs a native Codex executable, and checks
-actual runtime restrictions without login or inference. `Test-BackupLinks.ps1`
-exercises real Windows junction handling. Tests leave isolated artifacts under
-`tests/artifacts`; they do not download models or call hosted inference.
+References: [Claude CLI backend](https://docs.openclaw.ai/gateway/cli-backends), [Codex harness](https://docs.openclaw.ai/plugins/codex-harness), [Harness configuration](https://docs.openclaw.ai/plugins/codex-harness/configuration).
 
-The source has passed offline mock tests and runtime capability checks. Live
-subscription login, first hosted completion and GPU behavior require testing on
-the installation PC. After Codex updates, reconnect to validate its new executable.
+Only generic source is published. Credentials, runtime state, personal proposals, model files, backups and test artifacts are excluded.
 
-## Repository contents
-
-This repository contains generic source and tests only. Do not commit personal
-proposals, credentials, auth profiles, installed state, models, outputs or logs.
-Authentication profiles live in the user's local app data outside HomeAI backups.
-No license for redistributing third-party runtimes or weights is implied.
-
-Official integration references: [Codex authentication](https://learn.chatgpt.com/docs/auth),
-[Codex scripted execution](https://learn.chatgpt.com/docs/non-interactive-mode),
-[Codex configuration](https://learn.chatgpt.com/docs/config-file/config-reference),
-[Claude subscription interfaces](https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan).
