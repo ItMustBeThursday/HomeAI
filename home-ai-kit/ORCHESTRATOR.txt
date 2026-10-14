@@ -1,0 +1,75 @@
+HOMEAI PARALLEL ORCHESTRATOR
+
+From the repository on the gaming PC:
+  cd D:\HomeAIGit\HomeAI
+  git pull --ff-only
+  cd home-ai-kit
+  powershell -NoProfile -ExecutionPolicy Bypass -File .\Enable-HomeAIOrchestrator.ps1
+
+Requires the foundation, native chat and workbench installers to have succeeded.
+The installer makes a verified backup, upgrades the two owned local plugins,
+configures three worker agents and restarts HomeAI. It reuses existing logins.
+It downloads a pinned 622 MB EmbeddingGemma model, but does not activate it.
+If the embedding download fails, the already-enabled orchestrator stays enabled;
+rerun Stage-HomeAIModels.ps1 separately to retry the download.
+
+CHAT SELECTION IS NOT TASK ROUTING
+/model default -s clears the current chat model pin without changing defaults.
+An ordinary model selection persists in that session. Fallbacks are failure
+recovery, not task specialization. The orchestrator's main chat stays coherent;
+its plan assigns independent jobs to explicit worker lanes.
+
+Example to send in chat:
+Design a small offline habit-tracker web app in project habit-demo. Use a
+parallel HomeAI plan: Codex writes app.js and index.html; Claude writes
+DESIGN.md; local Qwen writes TEST-CASES.md. Then have Claude read those outputs
+and write REVIEW.md, dependent on all three assignments. Keep it local and
+report the actual model used for each job. Do not claim tests were executed.
+
+USEFUL COMMANDS
+/homeai_jobs lists queued/running/saved jobs without another model call.
+Ask chat to get a job ID to see its full progress, output hashes and errors.
+Manage-HomeAIJobs.ps1 can list/get/pause/resume without relying on chat inference.
+Audit-HomeAI.ps1 validates configuration and writes state\homeai-audit.json.
+
+MODEL ROLES
+Codex: implementation and code integration via its subscription-native runtime.
+Claude: design, document drafting, critical review via Claude Code login.
+Local Qwen 27B: private/local work and hosted-provider fallback.
+Gemma 4 E4B: quick bounded summaries/extraction through homeai_specialist.
+Qwen3-VL 4B: project image inspection through homeai_specialist.
+EmbeddingGemma 300M: downloaded for future semantic memory; not a chat worker.
+No need for another large general model before these roles are validated.
+Image generation, rendered professional documents and voice need separate
+verified tool backends; a text model alone does not provide those capabilities.
+Heretic remains staged source/readiness probing, not a modified model yet.
+
+CONCURRENCY AND LIMITS
+Up to three background turns plus the coordinator may be admitted. One worker
+per lane. Hosted weights use no local VRAM, but their local clients use some
+CPU/RAM, and all calls still count against each subscription's shared limits.
+Independent work can overlap; dependent review/integration waits for outputs.
+Use disjoint output paths. Worker tools enforce exact assigned write ownership.
+The coordinator can read all project outputs. Ollama retains its one-loaded-
+model/one-inference settings; local fallback requests queue on that server.
+Both hosted lanes have local Qwen fallback. A fallback answer is not proof that
+Claude/Codex worked; inspect job history. Unknown/interrupted dispatches never
+automatically replay because they might already have changed project files.
+
+PERSISTENCE
+Plans, job histories, native dispatch sessions, task checkpoints and project
+files survive gateway restarts. Queued work resumes when HomeAI runs again.
+Uncertain work is marked interrupted for inspection and explicit resume.
+Dependency assignments wait until their inputs have saved nonempty hashed files.
+That means ready for review, not approved, tested or deployed.
+An interrupted plan creation leaves staging records that never dispatch.
+Saved memory recall is currently keyword-based. Semantic embeddings are staged,
+not activated; model weights do not learn automatically from conversations.
+Windows reboot autostart and unattended system self-installation are not enabled.
+
+VERIFICATION
+Development: PS5.1 configuration + actual pinned core schema; persistent DAG,
+write scopes, dependency waits and conflict refusal; actual pinned Gateway
+three-worker integration using synthetic local model responses.
+Target: send the example plan and verify each hosted worker's actual model.
+This stage permits text project files only, not running builds/tests or shell.

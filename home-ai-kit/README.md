@@ -2,6 +2,29 @@
 
 Windows home AI: local Qwen through Ollama, OpenClaw chat, and optional subscription-backed Codex and Claude Code runtimes.
 
+## Parallel orchestration from chat
+
+After the native chat and workbench are working, update the gaming-PC clone and run:
+
+```powershell
+cd D:\HomeAIGit\HomeAI
+git pull --ff-only
+cd home-ai-kit
+powershell -NoProfile -ExecutionPolicy Bypass -File .\Enable-HomeAIOrchestrator.ps1
+```
+
+This upgrades the owned job/workbench plugins, assigns explicit Codex, Claude and local Qwen worker agents, allows three concurrent background turns plus the coordinator, and stages pinned EmbeddingGemma 300M (622 MB) for the future semantic-memory backend. It reuses existing subscription logins. The embedding download does not enable semantic memory or load the model into VRAM.
+
+The coordinator receives routing guidance and a `homeai_job` plan action. It can assign coding, design and bounded local work in parallel, then schedule integration/review with dependencies. Every assignment owns distinct output files; worker tools enforce that ownership. Plans and progress persist across restarts. Hosted lanes can fall back to local Qwen; actual model history distinguishes a hosted answer from fallback. The owned Ollama server retains its one-loaded-model/one-inference settings.
+
+Example: ask for a habit-tracker app in project `habit-demo`, with Codex writing `app.js` and `index.html`, Claude writing `DESIGN.md`, and local Qwen writing `TEST-CASES.md`; then Claude writes `REVIEW.md` after all three outputs exist. Use `/homeai_jobs` to inspect progress without another model call. These workers generate text project files; shell, build/test execution, publishing and system installation are not provided yet. Saved hashed outputs mean ready for review, not a tested app.
+
+Chat model selection persists separately. Send `/model default -s` to clear the current session's model pin without changing configured defaults. Worker assignments do not inherit that chat pin. Automations should select an explicit worker/agent or model; an automation running in the main session can inherit that session's selection. See [OpenClaw model commands](https://docs.openclaw.ai/tools/slash-commands).
+
+The installer validates configuration and writes a filtered `D:\HomeAI\state\homeai-audit.json`. Run `Audit-HomeAI.ps1` again to inspect model inventory, worker routes and saved job states. It performs no hosted inference and cannot certify subscription access. Detailed instructions and remaining limits are in `home-ai-kit/ORCHESTRATOR.txt`.
+
+Validation: Windows PowerShell 5.1 plus the actual pinned OpenClaw configuration schema; persistent dependency scheduling, scoped output ownership and competing-write refusal; an actual pinned Gateway test with three overlapping synthetic local model requests and real project-file outputs. Live Claude/Codex access must still be confirmed on the gaming PC.
+
 ## Add subscriptions to existing OpenClaw chat
 
 On the gaming PC, extract the installer ZIP and keep its helper files together. From that folder (or `home-ai-kit` in a GitHub source download), run:
@@ -41,7 +64,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\Enable-HomeAIWorkbench.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\Stage-Heretic.ps1
 ```
 
-Workbench setup backs up first, installs a local HomeAI tool plugin and downloads two pinned models: Gemma 4 E4B Q4 (~6.6 GB) for quick extraction/summaries, and Qwen3-VL 4B Q4 (~3.3 GB) for project-image inspection. It retains the existing main Qwen for code, documents and harder reasoning. Models stay on disk together; the owned Ollama server keeps only one loaded, and the specialist tool unloads other local models before switching. Local context is bounded to 8K for specialist calls. `-SkipModels` installs tools without downloading missing specialists. Model quality/GPU residency must still be checked on the gaming PC.
+Workbench setup backs up first, installs a local HomeAI tool plugin and downloads two pinned models: Gemma 4 E4B Q4 (~6.6 GB) for quick extraction/summaries, and Qwen3-VL 4B Q4 (~3.3 GB) for project-image inspection. It retains the existing main Qwen for code, documents and harder reasoning. Models stay on disk together; the owned Ollama scheduler keeps only one loaded and changes models as requests drain. Local context is bounded to 8K for specialist calls. `-SkipModels` installs tools without downloading missing specialists. Model quality/GPU residency must still be checked on the gaming PC.
 
 Start a new chat and ask: "Create a saved task named Workbench check, then write README.md in project sandbox-demo." Ask the quick specialist to summarize a paragraph and report its actual model. The main assistant chooses the `homeai_specialist` tool; deterministic task rules map the chosen role to an installed alias and exact recorded digest. This is tool-driven delegation, not a trained router or a guaranteed switch on every request. The main chat identity remains Codex/Claude/Qwen; hosted quota fallback remains separate.
 
@@ -53,13 +76,13 @@ References: [Heretic](https://github.com/p-e-w/heretic), [Gemma model tag](https
 
 ## Bounded persistent project jobs
 
-After workbench setup succeeds, run `Enable-HomeAIJobs.ps1` from `home-ai-kit`. It backs up, upgrades the owned workbench plugin to 0.2.0 for per-job project scoping, installs the local job service and adds a narrowly allowlisted `homeai-worker` agent. No model downloads, new subscription login or Linux distribution are involved.
+After workbench setup succeeds, run `Enable-HomeAIJobs.ps1` from `home-ai-kit` for the legacy serial queue, or `Enable-HomeAIOrchestrator.ps1` for explicit parallel lanes. Both back up, upgrade the owned workbench plugin, install the local job service and configure narrowly allowlisted worker agents. The serial installer does not download models or repeat subscription login.
 
 In a new chat, ask: "Submit a 2-step job in project jobs-demo to create README.md explaining HomeAI. Expected output: README.md." The `homeai_job` tool requires a named project, a goal, 1-20 expected files and a 1-6 step limit. Workers inherit the configured Codex/Claude/Qwen route; real hosted availability must be checked on the target. Only the selected project's file tool, task notes and local specialists are exposed. Shell, code/test execution, messaging, purchases, publishing and system installation are not added.
 
 Use `/homeai_jobs` for status without model inference. Jobs save progress, native result envelopes and file evidence under `D:\HomeAI\state\jobs`. A successful job is **ready-for-review**, not tested/completed. Verification checks expected files exist, are nonempty and records hashes; it does not certify correctness or quality. A missing output stops for review. Pause takes effect at a turn boundary. Interrupted/uncertain dispatches are not replayed automatically: inspect the recorded native session and project files before explicitly resuming. Resume grants two more steps, bounded by 12 total steps.
 
-Queued jobs resume when HomeAI starts. Windows login/autostart is not configured. Background jobs share your subscription/GPU resources; the service runs one job at a time. `/homeai_jobs` displays the latest 100 records; the worker considers the full queue. For direct pause/resume when the model is busy:
+Queued jobs resume when HomeAI starts. Windows login/autostart is not configured. Background jobs share your subscription/GPU resources; legacy jobs use one lane, while the orchestrator installer enables Codex/Claude/local lanes. `/homeai_jobs` displays the latest 100 records; the worker considers the full queue. For direct pause/resume when the model is busy:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File D:\HomeAI\scripts\Manage-HomeAIJobs.ps1 -Action list

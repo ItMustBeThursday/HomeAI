@@ -1,0 +1,33 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import {JobStore,settle} from '../home-ai-kit/jobs-plugin/store.mjs';
+import {eligible,agentFor,overlap} from '../home-ai-kit/jobs-plugin/scheduler.mjs';
+import plugin from '../home-ai-kit/workbench-plugin/index.mjs';
+const root=path.resolve('tests/artifacts/fleet-'+Date.now());await fs.mkdir(root,{recursive:true});
+await fs.writeFile(path.join(root,'homeai.json'),JSON.stringify({owner:'home-ai-kit-v1',root,backupRoot:path.join(root,'backups')}));
+const store=new JobStore(root);
+const tasks=[{key:'code',lane:'codex',goal:'Write code',expectedFiles:['app.js']},{key:'design',lane:'claude',goal:'Write design',expectedFiles:['design.md']},{key:'tests',lane:'local',goal:'Write test cases',expectedFiles:['cases.md']},{key:'review',lane:'claude',goal:'Review saved outputs',expectedFiles:['REVIEW.md'],dependsOn:['code','design','tests']}];
+await assert.rejects(store.createPlan({project:'demo',tasks:[tasks[0],{...tasks[1],expectedFiles:['APP.js']}]}),/different output/);
+await assert.rejects(store.createPlan({project:'demo',tasks:[{...tasks[0],dependsOn:['design']},tasks[1]]}),/earlier/);
+const plan=await store.createPlan({project:'demo',tasks});
+assert.equal((await new JobStore(root).getPlan(plan.id)).status,'committed');
+const jobs=await store.list(),first=jobs.filter(j=>!j.dependsOn.length),review=jobs.find(j=>j.dependsOn.length);
+const active=[];
+for(const job of first){assert.equal(await eligible(store,job,jobs,active),true);active.push(job);assert.equal(agentFor(job),'homeai-worker-'+job.lane);}
+assert.equal(await eligible(store,review,jobs,[]),false);
+const codeJob=first.find(j=>j.lane==='codex');assert.equal(overlap(codeJob,{...codeJob,expectedFiles:['APP.js']}),true);
+let factory;plugin.register({pluginConfig:{root},registerTool:f=>factory=f});
+const codex=first.find(j=>j.lane==='codex');
+const tools=factory({agentId:agentFor(codex),sessionKey:'agent:'+agentFor(codex)+':homeai-job-'+codex.id});
+assert.equal(tools.length,1);
+const secondTools=factory({agentId:agentFor(codex),sessionKey:'agent:'+agentFor(codex)+':homeai-job-'+codex.id});
+const writes=await Promise.allSettled([tools[0],secondTools[0]].map(t=>t.execute('test',{action:'write',project:'demo',file:'app.js',content:'first writer'})));
+assert.equal(writes.filter(r=>r.status==='fulfilled').length,1,'Concurrent creation must not silently overwrite.');
+await assert.rejects(tools[0].execute('test',{action:'write',project:'demo',file:'design.md',content:'bad'}),/assigned output/);
+assert.equal(factory({agentId:'homeai-worker-claude',sessionKey:'agent:homeai-worker-claude:homeai-job-'+codex.id}),null);
+await fs.mkdir(path.join(root,'projects/demo'),{recursive:true});
+for(const job of first){await fs.writeFile(path.join(root,'projects/demo',job.expectedFiles[0]),'Output');await settle(store,job.id,{decision:'ready',summary:'saved'});}
+assert.equal(await eligible(store,review,await store.list(),[]),true);
+await store.update(review.id,j=>j.status='paused');assert.equal(await eligible(store,await store.get(review.id),await store.list(),[]),false);
+console.log('PASS: parallel admission, durable dependency plans, review waits for hashed outputs, output conflict refusal and agent-bound write ownership.');

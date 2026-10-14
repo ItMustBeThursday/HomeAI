@@ -41,7 +41,7 @@ const restarted=createWorkbench(root,fakeFetch);
 const saved=(await restarted.find(t=>t.name==='homeai_task').execute('test',{action:'get',id:task.id})).details;
 assert.equal(saved.notes,'next step');assert.equal(saved.status,'working');
 const quick=await call('homeai_specialist',{task:'quick',prompt:'Extract keywords.'});assert.equal(quick.model,'fast');
-assert.ok(requests.some(r=>r.url.endsWith('/api/generate')&&r.body.model==='main'&&r.body.keep_alive===0));
+assert.ok(!requests.some(r=>r.url.endsWith('/api/generate')),'Specialists must not explicitly unload another active worker model.');
 const code=await call('homeai_specialist',{task:'auto',prompt:'Debug this function.'});assert.equal(code.model,'main');
 const input=requests.find(r=>r.url.endsWith('/api/chat')).body;
 assert.equal(input.messages.length,1);assert.equal(input.options.num_ctx,8192);assert.equal(input.tools,undefined);

@@ -57,5 +57,19 @@
       "pause/resume",
       "output hashes and review status"
     ]
+  },
+  "orchestrator": {
+    "status": "development-tested-target-verification-required",
+    "installer": "Enable-HomeAIOrchestrator.ps1",
+    "dependencyPlans": true,
+    "scopedWriteOwnership": true,
+    "buildAndTestsEnabled": false,
+    "lanes": [
+      "codex",
+      "claude",
+      "local"
+    ],
+    "semanticMemory": "embedding-model-staged-not-enabled",
+    "automaticWindowsStartup": false
   }
 }

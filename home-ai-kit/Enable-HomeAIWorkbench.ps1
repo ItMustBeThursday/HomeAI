@@ -58,7 +58,7 @@ $node=Get-HomeAINode $settings;$claw=Get-HomeAIOpenClaw $settings
 $installed=Assert-HomeAIChild (Join-Path $settings.root 'state\openclaw\extensions\homeai-workbench\package.json') $settings.root
 if(Test-Path -LiteralPath $installed) {
     $package=Get-Content -LiteralPath $installed -Raw | ConvertFrom-Json
-    if($package.name -ne 'homeai-workbench' -or $package.version -notin @('0.1.0','0.2.0')){throw 'A different workbench plugin is installed; automatic replacement refused.'}
+    if($package.name -ne 'homeai-workbench' -or $package.version -notin @('0.1.0','0.2.0','0.3.0')){throw 'A different workbench plugin is installed; automatic replacement refused.'}
 } else {Invoke-HomeAINative $node @($claw,'plugins','install',$pluginDir)}
 $configPath=Join-Path $settings.root 'state\openclaw\openclaw.json'
 $config=Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json

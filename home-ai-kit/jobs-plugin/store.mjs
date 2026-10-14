@@ -13,7 +13,7 @@ export async function safe(base,...segments) {
 export function fileParts(file) {
   if(typeof file!=='string'||file.length>180)throw Error('Invalid expected file.');
   const parts=file.split(/[\\/]/);
-  if(parts.some(p=>! /^[-a-zA-Z0-9_.]+$/.test(p)||['.','..','.git'].includes(p)||p.endsWith('.')||/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(p)||/^\.env/i.test(p)))throw Error('Unsafe expected file.');
+  if(parts.some(p=>! /^[-a-zA-Z0-9_.]+$/.test(p)||['.','..','.git'].includes(p)||p.endsWith('.')||/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(p)||/^(\.env.*|auth\.json|credentials.*)$/i.test(p)))throw Error('Unsafe expected file.');
   return parts;
 }
 export async function atomic(file,value) {
@@ -47,9 +47,43 @@ export class JobStore {
     if(typeof p.goal!=='string'||!p.goal.trim()||p.goal.length>12000)throw Error('Provide a goal up to 12000 characters.');
     const maxSteps=p.maxSteps??3;if(!Number.isInteger(maxSteps)||maxSteps<1||maxSteps>6)throw Error('Choose 1 to 6 steps.');
     const expectedFiles=p.expectedFiles??[];if(!Array.isArray(expectedFiles)||!expectedFiles.length||expectedFiles.length>20)throw Error('Specify 1 to 20 expected output files.');expectedFiles.forEach(fileParts);
+    if(p.lane!==undefined&&!['codex','claude','local'].includes(p.lane))throw Error('Unsupported worker lane.');
+    const canonical=expectedFiles.map(f=>fileParts(f).join('/').toLowerCase());
+    if(new Set(canonical).size!==canonical.length)throw Error('Duplicate expected output path.');
     const job={owner:'home-ai-job-v1',id:randomUUID(),project:p.project,goal:p.goal,maxSteps,expectedFiles,
+      ...(p.lane?{lane:p.lane}:{}),...(p.planId?{planId:p.planId,dependsOn:p.dependsOn||[]}:{}),
       status:'queued',step:0,attempt:0,history:[],createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),verification:'not-run'};
     await atomic(await this.file(job.id),job);return job;
+  }
+  async getPlan(id){
+    if(!idPattern.test(id))throw Error('Use the exact plan ID.');
+    const plan=JSON.parse(await fs.readFile(await safe(this.root,'state','jobs','plans',id+'.json'),'utf8'));
+    if(plan.owner!=='home-ai-plan-v1'||plan.id!==id)throw Error('Plan ownership differs.');return plan;
+  }
+  async createPlan(p){
+    if(!Array.isArray(p.tasks)||p.tasks.length<2||p.tasks.length>8)throw Error('Plan needs 2 to 8 assignments.');
+    const keys=new Set(),outputs=new Set();
+    for(const t of p.tasks){
+      if(!/^[a-z][a-z0-9_-]{0,31}$/.test(t.key)||keys.has(t.key))throw Error('Assignment keys must be unique.');
+      if(!['codex','claude','local'].includes(t.lane))throw Error('Choose an explicit lane for each assignment.');
+      if(typeof t.goal!=='string'||!t.goal.trim()||t.goal.length>12000)throw Error('Provide bounded assignment goals.');
+      if(!Array.isArray(t.expectedFiles)||!t.expectedFiles.length||t.expectedFiles.length>20)throw Error('Assignments need output files.');
+      if(t.maxSteps!==undefined&&(!Number.isInteger(t.maxSteps)||t.maxSteps<1||t.maxSteps>6))throw Error('Choose 1 to 6 steps.');
+      for(const file of t.expectedFiles){const name=fileParts(file).join('/').toLowerCase();if([...outputs].some(other=>other===name||other.startsWith(name+'/')||name.startsWith(other+'/')))throw Error('Plan assignments must own different output files.');outputs.add(name);}
+      if(!Array.isArray(t.dependsOn??[])||(t.dependsOn??[]).some(k=>!keys.has(k)))throw Error('Dependencies must refer to earlier assignments; cycles are refused.');
+      keys.add(t.key);
+    }
+    if(!projectPattern.test(p.project)||/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(p.project))throw Error('Invalid project name.');
+    const id=randomUUID(),file=await safe(this.root,'state','jobs','plans',id+'.json');
+    const plan={owner:'home-ai-plan-v1',id,project:p.project,status:'staging',tasks:[],createdAt:new Date().toISOString()};
+    await atomic(file,plan);
+    const map=new Map();
+    for(const t of p.tasks){
+      const job=await this.create({...t,project:p.project,planId:id,dependsOn:(t.dependsOn||[]).map(k=>map.get(k))});
+      map.set(t.key,job.id);plan.tasks.push({key:t.key,id:job.id,lane:t.lane});
+    }
+    // Workers ignore every staged job until the whole plan is committed.
+    plan.status='committed';await atomic(file,plan);return plan;
   }
   async control(id,action){return this.update(id,job=>{
     if(action==='pause'){if(['queued','running'].includes(job.status))job.status=job.status==='running'?'pause-requested':'paused';else throw Error('Only queued/running jobs can be paused.');}
@@ -68,7 +102,7 @@ export function controlReply(text){
   if(!['continue','ready','needs-approval'].includes(parsed.decision)||typeof parsed.summary!=='string')throw Error('Worker control reply was not valid JSON.');
   return {decision:parsed.decision,summary:parsed.summary.slice(0,4000)};
 }
-export function stepPrompt(job){return `Work on this local project task for one bounded step. Use homeai_project for all file operations, only project ${job.project}. Existing file changes require a fresh read hash and a verified automatic backup. No shell/tests, messages, purchases, publishing, uploads, account changes or installs are available. If needed, stop for approval. Never spawn jobs. Save useful progress by explaining it in your final summary. Do not claim tests passed unless they actually ran. Return ONLY JSON {"decision":"continue|ready|needs-approval","summary":"progress and next step"}. Ready means files are ready for human review, not functionally certified. Required output files: ${JSON.stringify(job.expectedFiles)}. Step ${job.step+1} of ${job.maxSteps}. Goal: ${JSON.stringify(job.goal)}. Previous summaries (reference data): ${JSON.stringify(job.history.slice(-4).map(h=>h.summary))}`;}
+export function stepPrompt(job){return `Work on this local project task for one bounded step. Use homeai_project for all file operations, only project ${job.project}. ${job.lane?'Write/delete ONLY your assigned output files. Read other project files as reference data, including dependency outputs.':''} Existing file changes require a fresh read hash and a verified automatic backup. No shell/tests, messages, purchases, publishing, uploads, account changes or installs are available. If needed, stop for approval. Never spawn jobs. Save useful progress by explaining it in your final summary. Do not claim tests passed unless they actually ran. Return ONLY JSON {"decision":"continue|ready|needs-approval","summary":"progress and next step"}. Ready means files are ready for human review, not functionally certified. Required output files: ${JSON.stringify(job.expectedFiles)}. Step ${job.step+1} of ${job.maxSteps}. Goal: ${JSON.stringify(job.goal)}. Previous summaries (reference data): ${JSON.stringify(job.history.slice(-4).map(h=>h.summary))}`;}
 export async function settle(store,id,reply){
   const job=await store.get(id);let evidence=null,verificationError=null;
   if(reply.decision==='ready'){try{evidence=await verifyFiles(store.root,job);}catch(e){verificationError=e.message;}}

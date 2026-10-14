@@ -1,8 +1,9 @@
 #Requires -Version 5.1
 [CmdletBinding()]
-param([string]$Root='D:\HomeAI',[switch]$PlanOnly)
+param([string]$Root='D:\HomeAI',[switch]$PlanOnly,[switch]$Fleet)
 . (Join-Path $PSScriptRoot 'Common.ps1')
 . (Join-Path $PSScriptRoot 'Workbench-Config.ps1')
+. (Join-Path $PSScriptRoot 'Fleet-Config.ps1')
 $settings=Get-HomeAISettings $Root
 $markerPath=Join-Path $settings.root 'state\workbench-connector.json'
 if(-not (Test-Path -LiteralPath $markerPath)){throw 'Finish Enable-HomeAIWorkbench.ps1 successfully before enabling jobs.'}
@@ -25,7 +26,7 @@ try {
             if($target -ne $file.FullName){Copy-Item -LiteralPath $file.FullName -Destination $target -Force}
         }
     }
-    foreach($name in @('Enable-HomeAIJobs.ps1','Workbench-Config.ps1','Enable-HomeAIWorkbench.ps1','Manage-HomeAIJobs.ps1')) {
+    foreach($name in @('Enable-HomeAIJobs.ps1','Fleet-Config.ps1','Enable-HomeAIOrchestrator.ps1','Stage-HomeAIModels.ps1','Audit-HomeAI.ps1','audit-homeai.mjs','Workbench-Config.ps1','Enable-HomeAIWorkbench.ps1','Manage-HomeAIJobs.ps1')) {
         $source=Join-Path $PSScriptRoot $name;$target=Assert-HomeAIChild (Join-Path $settings.root ('scripts\'+$name)) $settings.root
         if($source -ne $target){Copy-Item -LiteralPath $source -Destination $target -Force}
     }
@@ -34,7 +35,7 @@ try {
         $installed=Assert-HomeAIChild (Join-Path $settings.root ('state\openclaw\extensions\'+$name+'\package.json')) $settings.root
         if(Test-Path -LiteralPath $installed) {
             $package=Get-Content -LiteralPath $installed -Raw | ConvertFrom-Json
-            if($package.name -ne $name -or $package.version -notin @('0.1.0','0.2.0')){throw "Unrecognized existing package: $name"}
+            if($package.name -ne $name -or $package.version -notin @('0.1.0','0.2.0','0.3.0')){throw "Unrecognized existing package: $name"}
         }
     }
     Invoke-HomeAINative $node @($claw,'plugins','install',(Join-Path $settings.root 'scripts\workbench-plugin'),'--force','--no-enable')
@@ -53,6 +54,7 @@ try {
     } -Force
     $config.agents | Add-Member -NotePropertyName ownership -NotePropertyValue 'explicit' -Force
     $config.agents.defaults | Add-Member -NotePropertyName systemAgent -NotePropertyValue @{agentId='main'} -Force
+    if($Fleet -or $config.agents.entries.PSObject.Properties['homeai-worker-local']){$config=Set-HomeAIFleetConfig $config $settings}
     Write-HomeAIJson $configPath $config
     Invoke-HomeAINative $node @($claw,'config','validate')
     foreach($plugin in @('homeai-workbench','homeai-jobs')) {
@@ -65,6 +67,7 @@ try {
     & (Join-Path $PSScriptRoot 'Start-HomeAI.ps1') -Root $settings.root -NoBrowser
     Write-Host 'Jobs enabled. In a NEW chat, ask: Submit a 2-step job in project jobs-demo to create README.md describing HomeAI. Expected output: README.md.'
     Write-Host 'Use /homeai_jobs for status without model inference. Queued jobs resume when HomeAI starts; interrupted dispatches need inspection and explicit resume.'
+    if($Fleet){& (Join-Path $PSScriptRoot 'Audit-HomeAI.ps1') -Root $settings.root}
 } catch {
     $failure=$_
     try {& (Join-Path $PSScriptRoot 'Stop-HomeAI.ps1') -Root $settings.root} catch {throw $failure}
