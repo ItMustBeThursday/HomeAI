@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {randomUUID,createHash} from 'node:crypto';
 import {validateChecks,verifyChecks} from './checks.mjs';
+import {select as selectRoute,roles} from './router.mjs';
 const idPattern=/^[a-f0-9-]{36}$/;
 const projectPattern=/^[a-z0-9][a-z0-9_-]{0,63}$/;
 export async function safe(base,...segments) {
@@ -49,12 +50,14 @@ export class JobStore {
     const maxSteps=p.maxSteps??3;if(!Number.isInteger(maxSteps)||maxSteps<1||maxSteps>6)throw Error('Choose 1 to 6 steps.');
     const expectedFiles=p.expectedFiles??[];if(!Array.isArray(expectedFiles)||!expectedFiles.length||expectedFiles.length>20)throw Error('Specify 1 to 20 expected output files.');expectedFiles.forEach(fileParts);
     if(p.lane!==undefined&&!['codex','claude','local'].includes(p.lane))throw Error('Unsupported worker lane.');
+    const routed=await selectRoute(this.root,p);
+    if(p.role&&!routed&&!p.lane)throw Error('Adaptive routing is not enabled; choose an explicit lane or finish Enable-HomeAIAdaptive.ps1.');
     const requiredChecks=validateChecks(p.requiredChecks||[]);
-    if(requiredChecks.length&&!p.lane)throw Error('Required checks need an explicit worker lane.');
+    if(requiredChecks.length&&!p.lane&&!routed)throw Error('Required checks need an explicit worker lane.');
     const canonical=expectedFiles.map(f=>fileParts(f).join('/').toLowerCase());
     if(new Set(canonical).size!==canonical.length)throw Error('Duplicate expected output path.');
     const job={owner:'home-ai-job-v1',id:randomUUID(),project:p.project,goal:p.goal,maxSteps,expectedFiles,
-      ...(p.lane?{lane:p.lane}:{}),...(p.planId?{planId:p.planId,dependsOn:p.dependsOn||[]}:{}),requiredChecks,
+      ...(routed?{lane:routed.lane,role:routed.role,routed,laneConstraint:p.lane||null,importance:p.importance||'normal'}:p.lane?{lane:p.lane}:{}),...(p.planId?{planId:p.planId,dependsOn:p.dependsOn||[]}:{}),requiredChecks,
       status:'queued',step:0,attempt:0,history:[],createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),verification:'not-run'};
     await atomic(await this.file(job.id),job);return job;
   }
@@ -68,7 +71,9 @@ export class JobStore {
     const keys=new Set(),outputs=new Map(),ancestors=new Map();
     for(const t of p.tasks){
       if(!/^[a-z][a-z0-9_-]{0,31}$/.test(t.key)||keys.has(t.key))throw Error('Assignment keys must be unique.');
-      if(!['codex','claude','local'].includes(t.lane))throw Error('Choose an explicit lane for each assignment.');
+      if(t.lane!==undefined&&!['codex','claude','local'].includes(t.lane))throw Error('Choose a supported worker lane.');
+      if(!t.lane&&!t.role)throw Error('Choose a task role or explicit lane for each assignment.');
+      if(t.role!==undefined&&!roles.includes(t.role))throw Error('Choose a supported task role.');
       if(typeof t.goal!=='string'||!t.goal.trim()||t.goal.length>12000)throw Error('Provide bounded assignment goals.');
       if(!Array.isArray(t.expectedFiles)||!t.expectedFiles.length||t.expectedFiles.length>20)throw Error('Assignments need output files.');
       if(t.maxSteps!==undefined&&(!Number.isInteger(t.maxSteps)||t.maxSteps<1||t.maxSteps>6))throw Error('Choose 1 to 6 steps.');

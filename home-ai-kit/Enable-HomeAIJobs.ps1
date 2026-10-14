@@ -35,7 +35,7 @@ try {
         $installed=Assert-HomeAIChild (Join-Path $settings.root ('state\openclaw\extensions\'+$name+'\package.json')) $settings.root
         if(Test-Path -LiteralPath $installed) {
             $package=Get-Content -LiteralPath $installed -Raw | ConvertFrom-Json
-            if($package.name -ne $name -or $package.version -notin @('0.1.0','0.2.0','0.3.0')){throw "Unrecognized existing package: $name"}
+            if($package.name -ne $name -or $package.version -notin @('0.1.0','0.2.0','0.3.0','0.4.0')){throw "Unrecognized existing package: $name"}
         }
     }
     Invoke-HomeAINative $node @($claw,'plugins','install',(Join-Path $settings.root 'scripts\workbench-plugin'),'--force','--no-enable')
@@ -44,6 +44,7 @@ try {
     Write-HomeAIJson $configPath $config
     Invoke-HomeAINative $node @($claw,'plugins','install',(Join-Path $settings.root 'scripts\jobs-plugin'),'--force','--no-enable')
     $config.plugins.entries.'homeai-jobs'.enabled=$true
+    $config.plugins.entries.'homeai-jobs' | Add-Member -NotePropertyName hooks -NotePropertyValue @{allowConversationAccess=$true;allowPromptInjection=$true} -Force
     if($config.plugins.PSObject.Properties['allow']){$config.plugins.allow=@($config.plugins.allow)+@('homeai-jobs') | Select-Object -Unique}
     $config.tools.allow=@($config.tools.allow)+@('homeai_job') | Select-Object -Unique
     $config.tools.profile='full'

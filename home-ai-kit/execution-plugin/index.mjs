@@ -6,12 +6,12 @@ export default {id:'homeai-execution',name:'HomeAI Offline Checks',register(api)
   api.registerTool(ctx=>{
     let scope=null,jobId=null;
     if(ctx.agentId!=='main'){
-      const match=/^agent:(homeai-worker-(?:codex|claude|local)):homeai-job-([a-f0-9-]{36})$/.exec(ctx.sessionKey||'');
+      const match=/^agent:(homeai-worker-(?:codex(?:-sol)?|claude(?:-sonnet)?|local(?:-fast|-coder)?)):homeai-job-([a-f0-9-]{36})$/.exec(ctx.sessionKey||'');
       if(!match||ctx.agentId!==match[1])return null;
       try{
         const file=path.join(root,'state/jobs/records',match[2]+'.json');let cursor=file;
         while(true){const s=fs.lstatSync(cursor);if(s.isSymbolicLink()||(s.isFile()&&s.nlink>1))return null;const parent=path.dirname(cursor);if(parent===cursor)break;cursor=parent;}
-        const job=JSON.parse(fs.readFileSync(file,'utf8'));if(job.owner!=='home-ai-job-v1'||job.id!==match[2]||'homeai-worker-'+job.lane!==ctx.agentId)return null;
+        const job=JSON.parse(fs.readFileSync(file,'utf8'));if(job.owner!=='home-ai-job-v1'||job.id!==match[2]||(job.routed?.agentId||'homeai-worker-'+job.lane)!==ctx.agentId)return null;
         scope=job.project;jobId=job.id;
       }catch{return null;}
     }

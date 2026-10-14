@@ -2,6 +2,29 @@
 
 Windows home AI: local Qwen through Ollama, OpenClaw chat, and optional subscription-backed Codex and Claude Code runtimes.
 
+## Latest stage: adaptive roles and restorable improvements
+
+From the gaming-PC clone, after the orchestrator is working:
+
+```powershell
+cd D:\HomeAIGit\HomeAI
+git pull --ff-only
+cd home-ai-kit
+powershell -NoProfile -ExecutionPolicy Bypass -File .\Enable-HomeAINextStage.ps1
+```
+
+This runs the offline execution and adaptive routing installers. Starting preferences are Astra for planning, GPT-6.1 Sol for coding, Claude Opus/Sonnet for design and review, and local Gemma/Qwen for bounded work. These are priors, not claims of measured superiority. The router records actual model identities, reported tokens, latency, verified check results and human feedback. New jobs refresh choices when dispatched, consider busy provider lanes, and hold their selected agent through subsequent steps. Important jobs do not explore. Normal jobs occasionally use another qualified candidate in place of the favorite to gather comparisons without duplicating work.
+
+Recognized planning/coding/design/review chat requests can automatically select a hosted coordinator. Ordinary chat retains its session choice; explicit cron/heartbeat routing is separate. Use `/homeai_auto off` to retain manual chat model selection. Small local workers receive bounded prompts instead of full chat history. All local inference stays on the owned single-model Ollama server.
+
+Use `/homeai_router` for ranked preferences, `/homeai_rate JOB-ID 1-to-5` for human quality feedback, `/homeai_jobs` for actual worker models/check evidence, and `/homeai_changes` for model staging and revision reports. `/homeai_restore CHANGE-ID` restores the newest managed revision after verifying its backup. The coordinator can revise bounded task guidance or queue a checked catalogue model; it cannot rewrite runtime permissions or execute arbitrary Internet installers. The catalogue includes an optional pinned Qwen3-Coder 30B Q4 candidate (~19 GB), which must pass tool/GPU readiness before automatic use. New weights are retained on disk when routing is restored.
+
+The HomeAI job plugin now has explicit conversation/prompt-hook permission. Without that setting, OpenClaw registered its tools but blocked the orchestration guidance and model-selection hooks. The actual pinned Gateway test verified coordinator switching, variant worker scoping, token observations and a real isolated Node test using synthetic localhost inference. Hosted availability, model quality and GPU performance remain target-PC observations; precise subscription quota is unknown when native providers do not expose it.
+
+Learning changes saved routing preferences and guidance; it does not retrain weights or run paid-model loops while idle. Semantic memory, document rendering, image generation, voice and Heretic modification remain separate backend work. See `home-ai-kit/ADAPTIVE.txt` for the example role plan, thresholds, resource limits and recovery behavior.
+
+References for starting choices: [OpenAI model selection](https://developers.openai.com/api/docs/guides/model-selection), [Codex model availability](https://learn.chatgpt.com/docs/models), [Claude model overview](https://platform.claude.com/docs/en/models/overview), [Qwen coder tag](https://ollama.com/library/qwen3-coder:30b-a3b-q4_K_M).
+
 ## Offline app checks and bounded repair
 
 After the orchestrator is working, run `Enable-HomeAIExecution.ps1` from `D:\HomeAIGit\HomeAI\home-ai-kit`. It verifies a backup and tests Windows AppContainer isolation on the gaming PC before enabling `homeai_check`. No Linux, Docker, new model or API key is needed.

@@ -10,6 +10,7 @@ import {createHash} from 'node:crypto';
 const root=path.resolve('tests/artifacts/jr-'+Date.now());
 const fleet=process.argv.includes('--fleet');let concurrent=0,maxConcurrent=0;
 const execution=process.argv.includes('--execution');
+const adaptive=process.argv.includes('--adaptive');
 let release;const barrier=new Promise(r=>release=r);let firstRequests=0;
 const captured=[];
 await fs.mkdir(path.join(root,'workspace'),{recursive:true});
@@ -21,6 +22,7 @@ if(execution){
   const node=process.env.HOMEAI_TEST_NODE||process.execPath;await fs.copyFile(node,path.join(root,'runtime/isolated-node/node.exe'));
   await fs.mkdir(path.join(root,'state'),{recursive:true});await fs.writeFile(path.join(root,'state/execution-connector.json'),JSON.stringify({owner:'home-ai-execution-v1',enabled:true,nodeSha256:createHash('sha256').update(await fs.readFile(node)).digest('hex').toUpperCase()}));
 }
+if(adaptive){await fs.cp(path.resolve('home-ai-kit/autonomy-plugin'),path.join(root,'scripts/autonomy-plugin'),{recursive:true});await fs.mkdir(path.join(root,'state/router'),{recursive:true});await fs.writeFile(path.join(root,'state/router/guidance.txt'),'Use task roles and actual results.');await fs.writeFile(path.join(root,'state/router/pool.json'),JSON.stringify({owner:'home-ai-router-v1',enabled:true,autoCoordinator:true,models:[{id:'astra',ref:'ollama/fixture-planner',lane:'codex',agentId:'homeai-worker-codex',enabled:true,priors:{planning:.96}},{id:'sol',ref:'ollama/homeai-main:locked',lane:'codex',agentId:'homeai-worker-codex-sol',enabled:true,priors:{coding:.95}}]}));}
 const model=http.createServer(async(req,res)=>{
   let text='';for await(const data of req)text+=data;const input=text?JSON.parse(text):{};
   let body={models:[]};
@@ -38,12 +40,12 @@ const model=http.createServer(async(req,res)=>{
     let reports=[];if(execution)try{for(const dir of await fs.readdir(path.join(root,'state/execution/runs')))try{reports.push(JSON.parse(await fs.readFile(path.join(root,'state/execution/runs',dir,'report.json'),'utf8')));}catch{}}catch{}
     const checked=reports.some(r=>r.status==='passed');
     const fixtureContent=execution?"import test from 'node:test';import assert from 'node:assert/strict';test('real gateway assertion',()=>assert.equal(2+3,5));":'Verified fixture output.';
-    const message=!wrote&&canWrite?{role:'assistant',content:'',tool_calls:[{function:{name:'homeai_project',arguments:{action:'write',project:'demo',file:filename,content:fixtureContent}}}]}:
+    const message=input.model==='fixture-planner'?{role:'assistant',content:'ROUTER_PROBE_READY'}:!wrote&&canWrite?{role:'assistant',content:'',tool_calls:[{function:{name:'homeai_project',arguments:{action:'write',project:'demo',file:filename,content:fixtureContent}}}]}:
       execution&&!checked?{role:'assistant',content:'',tool_calls:[{function:{name:'homeai_check',arguments:{project:'demo',kind:'test',entry:filename}}}]}:
       !wrote&&dispatch?{role:'assistant',content:'',tool_calls:[{function:{name:dispatch.function.name,arguments:{id:'homeai_project',args:{action:'write',project:'demo',file:'README.md',content:'Verified fixture output.'}}}}]}:
       !wrote&&search?{role:'assistant',content:'',tool_calls:[{function:{name:search.function.name,arguments:{query:'homeai_project'}}}]}:
       {role:'assistant',content:JSON.stringify({decision:'ready',summary:'Created the required README.md.'})};
-    body={model:'homeai-main:locked',message,done:true,eval_count:5,eval_duration:1000000000};
+    body={model:input.model||'homeai-main:locked',message,done:true,eval_count:5,eval_duration:1000000000};
     concurrent--;
   }
   res.setHeader('Content-Type','application/json');res.end(JSON.stringify(body));
@@ -57,10 +59,19 @@ config.gateway.port=port;config.agents.defaults.workspace=path.join(root,'worksp
 config.agents.entries['homeai-worker']={workspace:path.join(root,'workspace'),tools:{allow:['homeai_project','homeai_task','homeai_specialist'],exec:{host:'gateway',mode:'ask'}}};
 if(fleet){config.agents.defaults.maxConcurrent=4;for(const lane of ['codex','claude','local'])config.agents.entries['homeai-worker-'+lane]={workspace:path.join(root,'workspace'),model:{primary:'ollama/homeai-main:locked',fallbacks:[]},tools:{allow:['homeai_project'],exec:{host:'gateway',mode:'ask'}}};}
 if(execution){config.tools.allow.push('homeai_check');config.agents.entries['homeai-worker-codex']={workspace:path.join(root,'workspace'),model:{primary:'ollama/homeai-main:locked',fallbacks:[]},tools:{allow:['homeai_project','homeai_check'],exec:{host:'gateway',mode:'ask'}}};}
+if(adaptive){
+  delete config.agents.entries['homeai-worker'];delete config.agents.entries['homeai-worker-codex'];
+  config.tools.allow.push('homeai_route','homeai_maintain');config.agents.entries['homeai-worker-codex-sol']={workspace:path.join(root,'workspace'),model:{primary:'ollama/homeai-main:locked',fallbacks:[]},tools:{allow:['homeai_project','homeai_check'],exec:{host:'gateway',mode:'ask'}}};
+  config.agents.entries['homeai-worker-local']={workspace:path.join(root,'workspace')};
+  config.agents.defaults.models['ollama/fixture-planner']={alias:'Synthetic planner'};config.agents.defaults.modelPolicy={allow:['ollama/homeai-main:locked','ollama/fixture-planner']};
+  config.models.providers.ollama.models.push({...config.models.providers.ollama.models[0],id:'fixture-planner',name:'Synthetic planner'});
+}
 config.agents.ownership='explicit';config.agents.defaults.systemAgent={agentId:'main'};
 config.models.providers.ollama.baseUrl='http://127.0.0.1:'+model.address().port;
 config.plugins={allow:['homeai-workbench','homeai-jobs','ollama'],load:{paths:[path.join(root,'scripts/workbench-plugin'),path.join(root,'scripts/jobs-plugin')]},entries:{'homeai-workbench':{enabled:true,config:{root}},'homeai-jobs':{enabled:true,config:{root}},ollama:{enabled:true}}};
+config.plugins.entries['homeai-jobs'].hooks={allowConversationAccess:true,allowPromptInjection:true};
 if(execution){config.plugins.allow.push('homeai-execution');config.plugins.load.paths.push(path.join(root,'scripts/execution-plugin'));config.plugins.entries['homeai-execution']={enabled:true,config:{root}};}
+if(adaptive){config.plugins.allow.push('homeai-autonomy');config.plugins.load.paths.push(path.join(root,'scripts/autonomy-plugin'));config.plugins.entries['homeai-autonomy']={enabled:true,config:{root}};}
 const state=path.join(root,'state/openclaw');await fs.mkdir(state,{recursive:true});await fs.writeFile(path.join(state,'openclaw.json'),JSON.stringify(config));
 await fs.writeFile(path.join(root,'homeai.json'),JSON.stringify({owner:'home-ai-kit-v1',root,backupRoot:path.join(root,'backups'),ollamaPort:model.address().port}));
 const claw=path.resolve('research/openclaw-runtime-check/node_modules/openclaw/openclaw.mjs');
@@ -68,22 +79,29 @@ const launcher=path.join(root,'runtime/openclaw/node_modules/openclaw/openclaw.m
 await fs.writeFile(launcher,`process.argv[1]=${JSON.stringify(claw)};await import(${JSON.stringify(pathToFileURL(claw).href)});`);
 const env={...process.env,OPENCLAW_STATE_DIR:state,OPENCLAW_CONFIG_PATH:path.join(state,'openclaw.json'),OPENCLAW_NO_AUTO_UPDATE:'1',OPENCLAW_TELEMETRY_ENABLED:'0',DO_NOT_TRACK:'1',OPENCLAW_NO_RESPAWN:'1',NODE_DISABLE_COMPILE_CACHE:'1'};
 const store=new JobStore(root);let targets;
-if(execution)targets=[(await store.create({project:'demo',lane:'codex',goal:'Create logic.test.mjs and run it with homeai_check.',expectedFiles:['logic.test.mjs'],requiredChecks:[{kind:'test',entry:'logic.test.mjs'}],maxSteps:1})).id];
+if(execution)targets=[(await store.create({project:'demo',...(adaptive?{role:'coding'}:{lane:'codex'}),goal:'Create logic.test.mjs and run it with homeai_check.',expectedFiles:['logic.test.mjs'],requiredChecks:[{kind:'test',entry:'logic.test.mjs'}],maxSteps:1})).id];
 else if(fleet){const plan=await store.createPlan({project:'demo',tasks:['codex','claude','local'].map((lane,i)=>({key:lane,lane,goal:'Create README'+(i+1)+'.md.',expectedFiles:['README'+(i+1)+'.md'],maxSteps:1}))});targets=plan.tasks.map(t=>t.id);}
 else targets=[(await store.create({project:'demo',goal:'Create README.md.',expectedFiles:['README.md'],maxSteps:1})).id];
 let log='';const gateway=spawn(process.env.HOMEAI_TEST_NODE||process.execPath,[claw,'gateway','run'],{env,windowsHide:true,stdio:['ignore','pipe','pipe']});
 for(const stream of [gateway.stdout,gateway.stderr])stream.on('data',data=>{log=(log+data).slice(-10000);});
 try{
-  for(let i=0;i<120;i++){
+  for(let i=0;i<300;i++){
     if(gateway.exitCode!==null)throw Error('Gateway exited: '+log);
     const current=await Promise.all(targets.map(id=>store.get(id)));
     if(current.every(j=>j.status==='ready-for-review')) {
       for(const j of current){const text=await fs.readFile(path.join(root,'projects/demo',j.expectedFiles[0]),'utf8');if(execution){if(j.checkEvidence?.[0]?.passedTests!==1)throw Error('Actual execution evidence missing.');}else if(text!=='Verified fixture output.')throw Error('Output differs.');}
       if(fleet&&maxConcurrent<3)throw Error('Worker model requests did not overlap: '+maxConcurrent);
-      console.log('PASS: actual OpenClaw Gateway service dispatched '+targets.length+' project-bound job(s), ran registered file tools and persisted verified output evidence. '+(fleet?'Three model requests overlapped. ':'')+(execution?'Registered check tool executed a real isolated Node test and job readiness required its evidence. ':'')+'Synthetic local models only; hosted account access not tested.');break;
+      if(adaptive){
+        const prompt=path.join(root,'router-probe.txt');await fs.writeFile(prompt,'Plan a small app.');
+        const text=await new Promise((resolve,reject)=>{let result='',error='';const processRef=spawn(process.env.HOMEAI_TEST_NODE||process.execPath,[claw,'agent','--agent','main','--session-key','router-probe','--message-file',prompt,'--timeout','30','--json'],{env,windowsHide:true,stdio:['ignore','pipe','pipe']});processRef.stdout.on('data',b=>result+=b);processRef.stderr.on('data',b=>error+=b);processRef.on('error',reject);processRef.on('exit',code=>code===0?resolve(result):reject(Error(error)));});
+        if(JSON.parse(text).result?.meta?.agentMeta?.model!=='fixture-planner')throw Error('Automatic coordinator routing did not select the planner.');
+        if(current[0].routed.agentId!=='homeai-worker-codex-sol')throw Error('Task router did not select the Sol worker variant.');
+        const observation=JSON.parse(await fs.readFile(path.join(root,'state/router/observations',current[0].id+'-1.json'),'utf8'));if(observation.actualModel!=='ollama/homeai-main:locked'||!Number.isFinite(observation.tokens.total))throw Error('Actual usage observation missing.');
+      }
+      console.log('PASS: actual OpenClaw Gateway service dispatched '+targets.length+' project-bound job(s), ran registered file tools and persisted verified output evidence. '+(fleet?'Three model requests overlapped. ':'')+(execution?'Registered check tool executed a real isolated Node test and job readiness required its evidence. ':'')+(adaptive?'Task-role variant routing, automatic coordinator hook and actual token observations verified. ':'')+'Synthetic local models only; hosted account access not tested.');break;
     }
     if(current.some(j=>['interrupted','needs-review'].includes(j.status)))throw Error(JSON.stringify(current)+'\n'+log);
-    if(i===119)throw Error('Job did not settle: '+JSON.stringify(current)+'\n'+log);
+    if(i===299)throw Error('Job did not settle: '+JSON.stringify(current)+'\n'+log);
     await new Promise(r=>setTimeout(r,1000));
   }
 }finally{

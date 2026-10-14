@@ -28,13 +28,14 @@ if (-not (Test-HomeAIListenerOwned $settings 'gateway' $settings.gatewayPort $no
         -RedirectStandardError (Join-Path $settings.root 'logs\gateway-error.log')
     Save-HomeAIProcess $settings 'gateway' $process
     $ready = $false
-    for ($i=0;$i -lt 60;$i++) {
+    for ($i=0;$i -lt 240;$i++) {
         $listeners = @(Get-NetTCPConnection -State Listen -LocalPort $settings.gatewayPort -ErrorAction SilentlyContinue)
         if ($listeners.Count -gt 0) { $ready=$true; break }
         if ($process.HasExited) { throw 'OpenClaw exited. Read logs\gateway-error.log.' }
+        if($i -gt 0 -and $i % 15 -eq 0){Write-Host "Waiting for OpenClaw cold start: $i / 240 seconds..."}
         Start-Sleep -Seconds 1
     }
-    if (-not $ready) { throw 'Gateway did not start within 60 seconds. Read its log.' }
+    if (-not $ready) { throw 'Gateway did not start within 240 seconds. Read its log.' }
 }
 Write-Host "OpenClaw is running locally on port $($settings.gatewayPort)."
 if (-not $NoBrowser) { Invoke-HomeAINative $node @($claw,'dashboard') }

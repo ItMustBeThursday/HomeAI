@@ -1,5 +1,5 @@
 export const lanes=['codex','claude','local'];
-export function agentFor(job){return job.lane?'homeai-worker-'+job.lane:'homeai-worker';}
+export function agentFor(job){return job.routed?.agentId||(job.lane?'homeai-worker-'+job.lane:'homeai-worker');}
 export function laneFor(job){return job.lane||'legacy';}
 export function overlap(a,b){
   if(a.project!==b.project)return false;

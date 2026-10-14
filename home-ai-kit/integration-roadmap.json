@@ -83,5 +83,29 @@
     "arbitraryShell": false,
     "installer": "Enable-HomeAIExecution.ps1",
     "dependencyInstallation": false
+  },
+  "adaptive": {
+    "verifiedGuidanceBackups": true,
+    "installer": "Enable-HomeAINextStage.ps1",
+    "idlePaidLoop": false,
+    "modelWeightTraining": false,
+    "roles": [
+      "planning",
+      "coding",
+      "design",
+      "review",
+      "quick",
+      "general"
+    ],
+    "exactQuota": "unknown when providers do not expose it",
+    "managedModelStaging": true,
+    "status": "core-schema-unit-and-gateway-verified-target-install-required",
+    "measurements": [
+      "actual model",
+      "reported tokens",
+      "latency",
+      "check evidence",
+      "human feedback"
+    ]
   }
 }

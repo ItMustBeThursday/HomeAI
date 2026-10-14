@@ -3,6 +3,7 @@ import path from 'node:path';
 import {spawn} from 'node:child_process';
 import {JobStore,safe,atomic,withLock,stepPrompt,controlReply,settle} from './store.mjs';
 import {agentFor,laneFor,eligible} from './scheduler.mjs';
+import {observe,select as selectRoute} from './router.mjs';
 const root=process.argv[2];if(!root)throw Error('Pass HomeAI root.');
 const settings=JSON.parse(await fs.readFile(await safe(root,'homeai.json'),'utf8'));
 if(settings.owner!=='home-ai-kit-v1'||path.resolve(settings.root)!==path.resolve(root))throw Error('HomeAI ownership differs.');
@@ -37,6 +38,10 @@ async function runTurn(job){
         const outputFile=await safe(root,'state','jobs','results',job.id+'-'+job.attempt+'.json');await atomic(outputFile,envelope);
         const control=controlReply(text);const meta=envelope.result?.meta??envelope.meta;
         control.model=meta?.agentMeta?.model??meta?.model??null;
+        control.provider=meta?.agentMeta?.provider??null;
+        const usage=meta?.agentMeta?.usage;
+        const finite=n=>Number.isFinite(n)&&n>=0?n:null;
+        control.tokens=usage?{input:finite(usage.input),output:finite(usage.output),cacheRead:finite(usage.cacheRead),total:finite(usage.total)}:null;
         resolve(control);
       }catch(error){reject(error);}
     });
@@ -44,15 +49,19 @@ async function runTurn(job){
 }
 while(!stopping){
   const jobs=(await store.list()).sort((a,b)=>a.createdAt.localeCompare(b.createdAt));
-  for(const next of jobs){
+  for(const savedJob of jobs){
     if(stopping||active.size>=3)break;
+    if(savedJob.status!=='queued'||(savedJob.dependsOn||[]).some(id=>jobs.find(j=>j.id===id)?.status!=='ready-for-review'))continue;
+    let next=savedJob;
+    if(next.status==='queued'&&next.attempt===0&&next.routed){const fresh=await selectRoute(root,{goal:next.goal,role:next.role,lane:next.laneConstraint||undefined,importance:next.importance,busyLanes:[...active.values()].map(v=>laneFor(v.job))});if(fresh)next={...next,lane:fresh.lane,routed:fresh};}
     if(!await eligible(store,next,jobs,[...active.values()].map(v=>v.job)))continue;
     let job;
-    try{job=await store.update(next.id,j=>{if(j.status!=='queued')throw Error('Job state changed before dispatch.');j.status='running';j.attempt++;j.dispatch={at:new Date().toISOString(),agentId:agentFor(j),lane:laneFor(j),sessionKey:'agent:'+agentFor(j)+':homeai-job-'+j.id};});}
+    try{job=await store.update(next.id,j=>{if(j.status!=='queued')throw Error('Job state changed before dispatch.');if(j.attempt===0&&next.routed){j.routed=next.routed;j.lane=next.lane;}j.status='running';j.attempt++;j.dispatch={at:new Date().toISOString(),agentId:agentFor(j),lane:laneFor(j),sessionKey:'agent:'+agentFor(j)+':homeai-job-'+j.id};});}
     catch(error){if(error.message==='Job state changed before dispatch.')continue;throw error;}
     const lane=laneFor(job);active.set(lane,{job,child:null});
     const task=(async()=>{
-      try{await settle(store,job.id,await runTurn(job));}
+      const started=Date.now();
+      try{const reply=await runTurn(job);const settled=await settle(store,job.id,reply);await observe(root,settled,reply,Date.now()-started);}
       catch(error){await store.update(job.id,j=>{j.status='interrupted';j.lastError=error.message.slice(0,2000);});}
       finally{active.delete(lane);}
     })();

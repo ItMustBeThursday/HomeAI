@@ -150,9 +150,9 @@ export default {id:'homeai-workbench',name:'HomeAI Workbench',register(api) {
   const root=api.pluginConfig?.root;if(typeof root!=='string'||! /^[A-Za-z]:[\\/]/.test(root))throw Error('Configure an absolute Windows HomeAI root.');
   const mainTools=createWorkbench(root);
   api.registerTool(ctx=>{
-    const worker=/^homeai-worker(?:-(?:codex|claude|local))?$/;
+    const worker=/^homeai-worker(?:-(?:codex(?:-sol)?|claude(?:-sonnet)?|local(?:-fast|-coder)?))?$/;
     if(!worker.test(ctx.agentId||'')&&!/^agent:homeai-worker(?:-|:)/.test(ctx.sessionKey||''))return mainTools;
-    const match=/^agent:(homeai-worker(?:-(?:codex|claude|local))?):homeai-job-([a-f0-9-]{36})$/.exec(ctx.sessionKey||'');
+    const match=/^agent:(homeai-worker(?:-(?:codex(?:-sol)?|claude(?:-sonnet)?|local(?:-fast|-coder)?))?):homeai-job-([a-f0-9-]{36})$/.exec(ctx.sessionKey||'');
     if(!match)return null;
     if(ctx.agentId&&ctx.agentId!==match[1])return null;
     const file=path.join(root,'state','jobs','records',match[2]+'.json');
@@ -160,7 +160,7 @@ export default {id:'homeai-workbench',name:'HomeAI Workbench',register(api) {
       let cursor=file;while(true){const s=fs.lstatSync(cursor);if(s.isSymbolicLink()||(s.isFile()&&s.nlink>1))return null;const parent=path.dirname(cursor);if(parent===cursor)break;cursor=parent;}
       const job=JSON.parse(fs.readFileSync(file,'utf8'));
       if(job.owner!=='home-ai-job-v1'||job.id!==match[2]||! /^[a-z0-9][a-z0-9_-]{0,63}$/.test(job.project))return null;
-      if((job.lane?'homeai-worker-'+job.lane:'homeai-worker')!==match[1])return null;
+      if((job.routed?.agentId||(job.lane?'homeai-worker-'+job.lane:'homeai-worker'))!==match[1])return null;
       const tools=createWorkbench(root,fetch,{projectScope:job.project,...(job.lane?{writeFiles:job.expectedFiles}: {})});
       return job.lane?tools.filter(t=>t.name==='homeai_project'):tools;
     }catch{return null;}

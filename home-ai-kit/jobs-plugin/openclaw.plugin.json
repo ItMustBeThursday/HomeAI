@@ -1,5 +1,5 @@
 {
   "id":"homeai-jobs","name":"HomeAI Jobs","description":"Bounded persistent project jobs through the existing Gateway",
-  "activation":{"onStartup":true},"contracts":{"tools":["homeai_job"]},
+  "activation":{"onStartup":true},"contracts":{"tools":["homeai_job","homeai_route"]},
   "configSchema":{"type":"object","additionalProperties":false,"required":["root"],"properties":{"root":{"type":"string","minLength":4}}}
 }

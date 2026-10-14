@@ -38,6 +38,10 @@ function Enable-HomeAINativeChatConfig($Config,$Settings,[string]$Primary='Codex
         $Config.plugins.entries.PSObject.Properties['homeai-execution'] -and $Config.plugins.entries.'homeai-execution'.enabled) {
         $Config.tools.allow+= 'homeai_check'
     }
+    if($Config.PSObject.Properties['plugins'] -and $Config.plugins.PSObject.Properties['entries'] -and
+        $Config.plugins.entries.PSObject.Properties['homeai-autonomy'] -and $Config.plugins.entries.'homeai-autonomy'.enabled) {
+        $Config.tools.allow+= @('homeai_route','homeai_maintain')
+    }
     # deny/allowlist also block Codex app-server runtime admission. Use the
     # human approval route while the finite tool list and read-only sandbox
     # continue to restrict what the native client may do.

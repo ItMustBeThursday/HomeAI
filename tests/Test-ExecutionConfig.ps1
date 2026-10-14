@@ -1,6 +1,7 @@
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'Test-FleetConfig.ps1')
 . (Join-Path $kit 'Execution-Config.ps1')
+$fleet.plugins.entries | Add-Member -NotePropertyName 'homeai-jobs' -NotePropertyValue @{enabled=$true;config=@{root=$settings.root}} -Force
 $execution=Set-HomeAIExecutionConfig $fleet $settings
 $json=($execution | ConvertTo-Json -Depth 50) | ConvertFrom-Json
 if(-not $json.plugins.entries.'homeai-execution'.enabled -or $json.plugins.entries.'homeai-execution'.config.root -ne $settings.root){throw 'Execution plugin is invalid.'}

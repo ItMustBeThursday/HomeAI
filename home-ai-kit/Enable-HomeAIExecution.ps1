@@ -42,7 +42,7 @@ try {
     if($probe.owner -ne 'home-ai-execution-probe-v1' -or -not $probe.passed){throw 'Isolation probe did not pass.'}
     foreach($id in @('homeai-jobs','homeai-execution')) {
         $packagePath=Assert-HomeAIChild (Join-Path $settings.root ('state\openclaw\extensions\'+$id+'\package.json')) $settings.root
-        if(Test-Path -LiteralPath $packagePath){$package=Get-Content -LiteralPath $packagePath -Raw | ConvertFrom-Json;if($package.name -ne $id -or $package.version -notin @('0.1.0','0.2.0','0.3.0')){throw "Unrecognized existing package: $id"}}
+        if(Test-Path -LiteralPath $packagePath){$package=Get-Content -LiteralPath $packagePath -Raw | ConvertFrom-Json;if($package.name -ne $id -or $package.version -notin @('0.1.0','0.2.0','0.3.0','0.4.0')){throw "Unrecognized existing package: $id"}}
     }
     # A valid disabled entry exists before official installation and rollback.
     $config=($saved | ConvertTo-Json -Depth 50) | ConvertFrom-Json
