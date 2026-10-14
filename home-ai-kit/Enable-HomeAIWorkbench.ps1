@@ -2,6 +2,7 @@
 [CmdletBinding()]
 param([string]$Root='D:\HomeAI',[switch]$PlanOnly,[switch]$SkipModels)
 . (Join-Path $PSScriptRoot 'Common.ps1')
+. (Join-Path $PSScriptRoot 'Workbench-Config.ps1')
 $settings=Get-HomeAISettings $Root
 if($settings.openclawVersion -ne '2026.10.3'){throw 'Workbench targets the checked OpenClaw 2026.10.3 runtime.'}
 Write-Host 'Stage 3: local project file tools with verified backups, durable task notes, and local specialist routing.'
@@ -61,19 +62,7 @@ if(Test-Path -LiteralPath $installed) {
 } else {Invoke-HomeAINative $node @($claw,'plugins','install',$pluginDir)}
 $configPath=Join-Path $settings.root 'state\openclaw\openclaw.json'
 $config=Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
-if(-not $config.PSObject.Properties['plugins']){throw 'Native chat plugins must be connected first.'}
-$config.plugins.entries | Add-Member -NotePropertyName 'homeai-workbench' -NotePropertyValue @{enabled=$true;config=@{root=$settings.root}} -Force
-if($config.plugins.PSObject.Properties['allow']){$config.plugins.allow=@($config.plugins.allow)+@('homeai-workbench') | Select-Object -Unique}
-$config.tools.allow=@($config.tools.allow)+@('homeai_project','homeai_task','homeai_specialist') | Select-Object -Unique
-foreach($role in @('quick','vision')) {
-    $route=$roles[$role]
-    if($route.status -ne 'installed'){continue}
-    $config.models.providers.ollama.models=@($config.models.providers.ollama.models | Where-Object {$_.id -ne $route.model})+@(@{
-        id=$route.model;name=('Local '+$role);reasoning=$false;input=if($role -eq 'vision'){@('text','image')}else{@('text')};
-        contextWindow=8192;maxTokens=2048;cost=@{input=0;output=0;cacheRead=0;cacheWrite=0}
-    })
-    $config.agents.defaults.models | Add-Member -NotePropertyName ('ollama/'+$route.model) -NotePropertyValue @{alias=('Local '+$role)} -Force
-}
+$config=Set-HomeAIWorkbenchConfig $config $settings $roles
 Write-HomeAIJson $configPath $config
 Invoke-HomeAINative $node @($claw,'config','validate')
 $inspectionText=& $node $claw plugins inspect homeai-workbench --runtime --json
@@ -92,7 +81,9 @@ Invoke-HomeAINative $node @($claw,'dashboard')
     $failure=$_
     Write-Host 'Workbench setup did not finish. Restoring the prior chat configuration and attempting to restart it.'
     try {& (Join-Path $PSScriptRoot 'Stop-HomeAI.ps1') -Root $settings.root} catch {Write-Host ('Service cleanup needs attention: '+$_.Exception.Message);throw $failure}
-    [IO.File]::WriteAllBytes($savedConfigPath,$savedConfigBytes)
+    $restored=[Text.Encoding]::UTF8.GetString($savedConfigBytes).TrimStart([char]0xFEFF) | ConvertFrom-Json
+    $restored=Set-HomeAIWorkbenchConfig $restored $settings @{} -Disabled
+    Write-HomeAIJson $savedConfigPath $restored
     try {& (Join-Path $PSScriptRoot 'Start-HomeAI.ps1') -Root $settings.root -NoBrowser} catch {Write-Host ('Chat restart also needs attention: '+$_.Exception.Message)}
     throw $failure
 }
