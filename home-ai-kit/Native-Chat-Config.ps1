@@ -24,6 +24,10 @@ function Enable-HomeAINativeChatConfig($Config,$Settings,[string]$Primary='Codex
     # Profile narrowing alone is insufficient for the native Codex harness.
     $Config.tools.PSObject.Properties.Remove('alsoAllow')
     $Config.tools | Add-Member -NotePropertyName allow -NotePropertyValue @('memory_search','memory_get','sessions_history') -Force
+    if($Config.PSObject.Properties['plugins'] -and $Config.plugins.PSObject.Properties['entries'] -and
+        $Config.plugins.entries.PSObject.Properties['homeai-workbench'] -and $Config.plugins.entries.'homeai-workbench'.enabled) {
+        $Config.tools.allow+=@('homeai_project','homeai_task','homeai_specialist')
+    }
     # deny/allowlist also block Codex app-server runtime admission. Use the
     # human approval route while the finite tool list and read-only sandbox
     # continue to restrict what the native client may do.

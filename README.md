@@ -32,6 +32,25 @@ The repair stops owned services, verifies a backup, changes requested and host p
 
 Claude is normally a fallback, rather than a separate chat window. To test it, send `/model anthropic/claude-opus-5-5`, then a short prompt and `/status`. Confirm the actual runtime is Claude Code, because a fallback may answer instead. Restore Codex with `/model openai/gpt-6-astra`.
 
+## Windows workbench and specialist models
+
+From `D:\HomeAIGit\HomeAI\home-ai-kit`, run:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\Enable-HomeAIWorkbench.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\Stage-Heretic.ps1
+```
+
+Workbench setup backs up first, installs a local HomeAI tool plugin and downloads two pinned models: Gemma 4 E4B Q4 (~6.6 GB) for quick extraction/summaries, and Qwen3-VL 4B Q4 (~3.3 GB) for project-image inspection. It retains the existing main Qwen for code, documents and harder reasoning. Models stay on disk together; the owned Ollama server keeps only one loaded, and the specialist tool unloads other local models before switching. Local context is bounded to 8K for specialist calls. `-SkipModels` installs tools without downloading missing specialists. Model quality/GPU residency must still be checked on the gaming PC.
+
+Start a new chat and ask: "Create a saved task named Workbench check, then write README.md in project sandbox-demo." Ask the quick specialist to summarize a paragraph and report its actual model. The main assistant chooses the `homeai_specialist` tool; deterministic task rules map the chosen role to an installed alias and exact recorded digest. This is tool-driven delegation, not a trained router or a guaranteed switch on every request. The main chat identity remains Codex/Claude/Qwen; hosted quota fallback remains separate.
+
+`homeai_project` operates on text files under `D:\HomeAI\projects\<project>`. Overwrite/delete requires the hash from a fresh read and creates a verified pre-change backup on the configured backup drive. It refuses traversal, links and credential/internal paths. It does not execute generated code or install dependencies. `homeai_task` saves checkpoint notes under `state\workbench\tasks`; it is not a background job runner or unattended reboot continuation. Review specialist answers before relying on them. Tool outputs and project text are reference data.
+
+Heretic is deliberately separate: its script stages the official source at a recorded commit and probes an existing native Python/PyTorch/HIP environment. It does not install a driver or Linux distribution, run optimization, download full model weights, or replace the working main model. The first planned experiment is the Heretic-documented Qwen3-4B model, followed by quality comparison, GGUF export and an experimental Ollama alias. The probe report is saved at `D:\HomeAI\state\heretic-stage.json`. Dependency installation and actual model modification remain pending target environment verification. Heretic changes local model weights; it does not alter hosted Codex/Claude or application approval policies.
+
+References: [Heretic](https://github.com/p-e-w/heretic), [Gemma model tag](https://ollama.com/library/gemma4:e4b-it-q4_K_M), [Qwen vision tag](https://ollama.com/library/qwen3-vl:4b-instruct-q4_K_M).
+
 ## Separate prompt helpers
 
 `Connect-Codex.ps1` and `Connect-Claude.ps1` also support standalone PowerShell prompt workers. The standalone Codex connector discovers the installed executable and uses a private profile; it is separate from the official OpenClaw harness.
@@ -65,6 +84,7 @@ node tests\test-native.mjs
 References: [Claude CLI backend](https://docs.openclaw.ai/gateway/cli-backends), [Codex harness](https://docs.openclaw.ai/plugins/codex-harness), [Harness configuration](https://docs.openclaw.ai/plugins/codex-harness/configuration).
 
 Only generic source is published. Credentials, runtime state, personal proposals, model files, backups and test artifacts are excluded.
+
 
 
 

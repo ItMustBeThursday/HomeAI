@@ -1,6 +1,6 @@
 {
   "chat": {
-    "status": "ready-for-target-validation",
+    "status": "user-confirmed-running",
     "fallbacks": [
       "Claude Code",
       "local Qwen"
@@ -17,8 +17,8 @@
       "Preserve human approval for external actions; back up before project deletion",
       "Test send, completion callback, restart recovery and quota handling before autonomous continuation"
     ],
-    "reason": "Documented runtime is macOS/Linux; exact Desktop/direct-Claude profiles are macOS. Native Windows control is unverified.",
-    "status": "queued-compatibility-evaluation"
+    "reason": "WSL feature exists, but no Linux distribution is installed; user prefers no Ubuntu installation. Current stage remains Windows-native.",
+    "status": "deferred-no-linux-distribution"
   },
   "schemaVersion": 1,
   "deferred": [
@@ -27,5 +27,22 @@
     "voice",
     "assistive hardware"
   ],
-  "autonomousContinuationImplemented": false
+  "autonomousContinuationImplemented": false,
+  "workbench": {
+    "installer": "Enable-HomeAIWorkbench.ps1",
+    "status": "ready-for-target-validation",
+    "features": [
+      "project text files with verified pre-change backups",
+      "persistent task checkpoints",
+      "local specialist inference"
+    ],
+    "unattendedExecution": false
+  },
+  "heretic": {
+    "installer": "Stage-Heretic.ps1",
+    "status": "source-and-readiness-staging",
+    "firstExperiment": "Qwen/Qwen3-4B-Instruct-2507",
+    "mainModelReplacement": false,
+    "nextStep": "Use target native PyTorch/HIP probe to select an isolated compatible environment; then run a separate model experiment and benchmark before importing."
+  }
 }
