@@ -12,7 +12,8 @@ const report={owner:'home-ai-audit-v1',at:new Date().toISOString(),main:config.a
 for(const lane of ['codex','claude','local']){
   const entry=config.agents?.entries?.['homeai-worker-'+lane];report.workers[lane]=entry?{configured:true,model:entry.model,tools:entry.tools?.allow,liveInferenceVerified:false}:{configured:false};
 }
-for(const id of ['homeai-workbench','homeai-jobs','codex','anthropic'])report.plugins[id]={enabled:config.plugins?.entries?.[id]?.enabled===true};
+for(const id of ['homeai-workbench','homeai-jobs','homeai-execution','codex','anthropic'])report.plugins[id]={enabled:config.plugins?.entries?.[id]?.enabled===true};
+try{const marker=JSON.parse(await fs.readFile(await safe(root,'state','execution-connector.json'),'utf8'));report.execution={enabled:marker.owner==='home-ai-execution-v1'&&marker.enabled===true,probeRunId:marker.probe,isolation:'Windows AppContainer + Node permissions',supportedChecks:['syntax','dependency-free node:test'],arbitraryShell:false};}catch{report.execution={enabled:false};}
 try{
   const response=await fetch('http://127.0.0.1:'+settings.ollamaPort+'/api/tags',{signal:AbortSignal.timeout(10000)});
   if(!response.ok)throw Error('HTTP '+response.status);

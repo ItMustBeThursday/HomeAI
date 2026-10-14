@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {randomUUID,createHash} from 'node:crypto';
+import {validateChecks,verifyChecks} from './checks.mjs';
 const idPattern=/^[a-f0-9-]{36}$/;
 const projectPattern=/^[a-z0-9][a-z0-9_-]{0,63}$/;
 export async function safe(base,...segments) {
@@ -48,10 +49,12 @@ export class JobStore {
     const maxSteps=p.maxSteps??3;if(!Number.isInteger(maxSteps)||maxSteps<1||maxSteps>6)throw Error('Choose 1 to 6 steps.');
     const expectedFiles=p.expectedFiles??[];if(!Array.isArray(expectedFiles)||!expectedFiles.length||expectedFiles.length>20)throw Error('Specify 1 to 20 expected output files.');expectedFiles.forEach(fileParts);
     if(p.lane!==undefined&&!['codex','claude','local'].includes(p.lane))throw Error('Unsupported worker lane.');
+    const requiredChecks=validateChecks(p.requiredChecks||[]);
+    if(requiredChecks.length&&!p.lane)throw Error('Required checks need an explicit worker lane.');
     const canonical=expectedFiles.map(f=>fileParts(f).join('/').toLowerCase());
     if(new Set(canonical).size!==canonical.length)throw Error('Duplicate expected output path.');
     const job={owner:'home-ai-job-v1',id:randomUUID(),project:p.project,goal:p.goal,maxSteps,expectedFiles,
-      ...(p.lane?{lane:p.lane}:{}),...(p.planId?{planId:p.planId,dependsOn:p.dependsOn||[]}:{}),
+      ...(p.lane?{lane:p.lane}:{}),...(p.planId?{planId:p.planId,dependsOn:p.dependsOn||[]}:{}),requiredChecks,
       status:'queued',step:0,attempt:0,history:[],createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),verification:'not-run'};
     await atomic(await this.file(job.id),job);return job;
   }
@@ -62,15 +65,24 @@ export class JobStore {
   }
   async createPlan(p){
     if(!Array.isArray(p.tasks)||p.tasks.length<2||p.tasks.length>8)throw Error('Plan needs 2 to 8 assignments.');
-    const keys=new Set(),outputs=new Set();
+    const keys=new Set(),outputs=new Map(),ancestors=new Map();
     for(const t of p.tasks){
       if(!/^[a-z][a-z0-9_-]{0,31}$/.test(t.key)||keys.has(t.key))throw Error('Assignment keys must be unique.');
       if(!['codex','claude','local'].includes(t.lane))throw Error('Choose an explicit lane for each assignment.');
       if(typeof t.goal!=='string'||!t.goal.trim()||t.goal.length>12000)throw Error('Provide bounded assignment goals.');
       if(!Array.isArray(t.expectedFiles)||!t.expectedFiles.length||t.expectedFiles.length>20)throw Error('Assignments need output files.');
       if(t.maxSteps!==undefined&&(!Number.isInteger(t.maxSteps)||t.maxSteps<1||t.maxSteps>6))throw Error('Choose 1 to 6 steps.');
-      for(const file of t.expectedFiles){const name=fileParts(file).join('/').toLowerCase();if([...outputs].some(other=>other===name||other.startsWith(name+'/')||name.startsWith(other+'/')))throw Error('Plan assignments must own different output files.');outputs.add(name);}
       if(!Array.isArray(t.dependsOn??[])||(t.dependsOn??[]).some(k=>!keys.has(k)))throw Error('Dependencies must refer to earlier assignments; cycles are refused.');
+      validateChecks(t.requiredChecks||[]);
+      const prior=new Set();for(const key of t.dependsOn||[]){prior.add(key);for(const ancestor of ancestors.get(key)||[])prior.add(ancestor);}ancestors.set(t.key,prior);
+      const own=new Set();for(const file of t.expectedFiles){
+        const name=fileParts(file).join('/').toLowerCase();if(own.has(name))throw Error('Duplicate expected output path.');own.add(name);
+        for(const [other,owners] of outputs){
+          if(other===name){if(owners.some(owner=>!prior.has(owner)))throw Error('Concurrent plan assignments must own different output files; depend on earlier owners before editing their outputs.');}
+          else if(other.startsWith(name+'/')||name.startsWith(other+'/'))throw Error('Plan output paths cannot conflict as files and directories.');
+        }
+        outputs.set(name,[...(outputs.get(name)||[]),t.key]);
+      }
       keys.add(t.key);
     }
     if(!projectPattern.test(p.project)||/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(p.project))throw Error('Invalid project name.');
@@ -102,15 +114,15 @@ export function controlReply(text){
   if(!['continue','ready','needs-approval'].includes(parsed.decision)||typeof parsed.summary!=='string')throw Error('Worker control reply was not valid JSON.');
   return {decision:parsed.decision,summary:parsed.summary.slice(0,4000)};
 }
-export function stepPrompt(job){return `Work on this local project task for one bounded step. Use homeai_project for all file operations, only project ${job.project}. ${job.lane?'Write/delete ONLY your assigned output files. Read other project files as reference data, including dependency outputs.':''} Existing file changes require a fresh read hash and a verified automatic backup. No shell/tests, messages, purchases, publishing, uploads, account changes or installs are available. If needed, stop for approval. Never spawn jobs. Save useful progress by explaining it in your final summary. Do not claim tests passed unless they actually ran. Return ONLY JSON {"decision":"continue|ready|needs-approval","summary":"progress and next step"}. Ready means files are ready for human review, not functionally certified. Required output files: ${JSON.stringify(job.expectedFiles)}. Step ${job.step+1} of ${job.maxSteps}. Goal: ${JSON.stringify(job.goal)}. Previous summaries (reference data): ${JSON.stringify(job.history.slice(-4).map(h=>h.summary))}`;}
+export function stepPrompt(job){return `Work on this local project task for one bounded step. Use homeai_project for all file operations, only project ${job.project}. ${job.lane?'Write/delete ONLY your assigned output files. Read other project files as reference data, including dependency outputs.':''} Existing file changes require a fresh read hash and a verified automatic backup. No shell/tests, messages, purchases, publishing, uploads, account changes or installs are available EXCEPT the homeai_check tool, if exposed, can run offline dependency-free JavaScript checks inside the isolated copied-snapshot runner. Required checks: ${JSON.stringify(job.requiredChecks||[])}. Run required checks after saving changes, inspect actual results, fix only your owned files and rerun failed checks within the step budget. Use continue if a repair remains; ready requires saved outputs and passing required checks against unchanged source hashes. If an unavailable capability is needed, stop for approval. Never spawn jobs. Save useful progress by explaining it in your final summary. Do not claim tests passed unless they actually ran. Return ONLY JSON {"decision":"continue|ready|needs-approval","summary":"progress and next step"}. Ready means files are ready for human review, not functionally certified. Required output files: ${JSON.stringify(job.expectedFiles)}. Step ${job.step+1} of ${job.maxSteps}. Goal: ${JSON.stringify(job.goal)}. Previous summaries (reference data): ${JSON.stringify(job.history.slice(-4).map(h=>h.summary))}`;}
 export async function settle(store,id,reply){
-  const job=await store.get(id);let evidence=null,verificationError=null;
-  if(reply.decision==='ready'){try{evidence=await verifyFiles(store.root,job);}catch(e){verificationError=e.message;}}
+  const job=await store.get(id);let evidence=null,checks=[],verificationError=null;
+  if(reply.decision==='ready'){try{checks=await verifyChecks(store.root,job);evidence=await verifyFiles(store.root,job);}catch(e){evidence=null;verificationError=e.message;}}
   return store.update(id,current=>{
     current.step++;current.history.push({...reply,at:new Date().toISOString()});current.dispatch=null;
     if(current.status==='pause-requested'){current.status='paused';return;}
     if(reply.decision==='needs-approval'){current.status='needs-approval';return;}
-    if(evidence){current.status='ready-for-review';current.verification='expected-files-present-and-hashed';current.evidence=evidence;return;}
+    if(evidence){current.status='ready-for-review';current.verification=checks.length?'expected-files-hashed-and-required-checks-passed':'expected-files-present-and-hashed';current.evidence=evidence;current.checkEvidence=checks;return;}
     if(verificationError){current.status='needs-review';current.lastError=verificationError;return;}
     current.status=current.step>=current.maxSteps?'needs-review':'queued';
   });

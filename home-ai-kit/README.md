@@ -2,6 +2,16 @@
 
 Windows home AI: local Qwen through Ollama, OpenClaw chat, and optional subscription-backed Codex and Claude Code runtimes.
 
+## Offline app checks and bounded repair
+
+After the orchestrator is working, run `Enable-HomeAIExecution.ps1` from `D:\HomeAIGit\HomeAI\home-ai-kit`. It verifies a backup and tests Windows AppContainer isolation on the gaming PC before enabling `homeai_check`. No Linux, Docker, new model or API key is needed.
+
+Workers can check JavaScript syntax and run dependency-free built-in `node:test` tests on copied read-only project snapshots. The runner has no network capability; Node permissions also block outside-file access, writes, child processes and addons. Execution is supervised by a Windows job object and bounded to 30 seconds. Real exit codes, logs, source hashes and test counts are saved under `state/execution/runs`. Empty or skipped-only tests do not pass. The runner cannot install npm dependencies, run arbitrary build scripts or test browser rendering.
+
+Plans now allow an ordered file-ownership handoff: Codex writes app logic, Claude writes tests in parallel, then Codex depends on both assignments and owns the app logic for test/repair. Add `requiredChecks: [{kind: "test", entry: "logic.test.mjs"}]` to that integration assignment. Readiness requires passing job-bound checks and unchanged tested source hashes. The final state remains ready for review; generated-test quality and untested app behavior need assessment.
+
+The native isolation probe and an actual pinned Gateway-to-worker-to-check integration test passed on the development Windows environment. The installer reruns the probe on the gaming PC. Detailed instructions and the example plan are in `home-ai-kit/EXECUTION.txt`.
+
 ## Parallel orchestration from chat
 
 After the native chat and workbench are working, update the gaming-PC clone and run:

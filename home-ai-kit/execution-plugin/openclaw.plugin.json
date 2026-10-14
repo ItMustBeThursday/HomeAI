@@ -1,0 +1,1 @@
+{"id":"homeai-execution","name":"HomeAI Offline Checks","description":"Isolated offline JavaScript checks on copied project snapshots","activation":{"onStartup":true},"contracts":{"tools":["homeai_check"]},"configSchema":{"type":"object","additionalProperties":false,"required":["root"],"properties":{"root":{"type":"string","minLength":4}}}}

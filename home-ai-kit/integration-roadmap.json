@@ -71,5 +71,17 @@
     ],
     "semanticMemory": "embedding-model-staged-not-enabled",
     "automaticWindowsStartup": false
+  },
+  "execution": {
+    "supported": [
+      "JavaScript syntax",
+      "dependency-free node:test",
+      "bounded repair with source evidence"
+    ],
+    "status": "native-and-gateway-tested-target-probe-required",
+    "network": false,
+    "arbitraryShell": false,
+    "installer": "Enable-HomeAIExecution.ps1",
+    "dependencyInstallation": false
   }
 }
