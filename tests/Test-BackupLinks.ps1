@@ -20,6 +20,14 @@ New-Item -ItemType Junction -Path (Join-Path $install 'state\openclaw\plugin-ski
 New-Item -ItemType Junction -Path (Join-Path $install 'state\openclaw\plugin-skills\cycle') -Target $install | Out-Null
 New-Item -ItemType Junction -Path (Join-Path $install 'state\openclaw\npm\projects\openclaw-codex-8902d781d4\node_modules\@openclaw\codex\node_modules\openclaw') -Target $external | Out-Null
 New-Item -ItemType Junction -Path (Join-Path $install 'state\openclaw\npm\projects\cycle') -Target $install | Out-Null
+foreach($cache in @('state\openclaw\tmp\plugin-captures','state\openclaw\sandbox\skills-workspaces','state\openclaw\cache\control-ui-assets')) {
+    New-Item -ItemType Directory -Path (Join-Path $install $cache) -Force | Out-Null
+    New-Item -ItemType Junction -Path (Join-Path $install ($cache+'\host-package-link')) -Target $external | Out-Null
+    New-Item -ItemType Junction -Path (Join-Path $install ($cache+'\cycle')) -Target $install | Out-Null
+}
+[IO.File]::WriteAllText((Join-Path $install 'state\openclaw\tmp\retained-sibling.txt'),'retain sibling outside captures')
+[IO.File]::WriteAllText((Join-Path $install 'state\openclaw\sandbox\retained-sibling.txt'),'retain sandbox sibling')
+[IO.File]::WriteAllText((Join-Path $install 'state\openclaw\cache\retained-sibling.txt'),'retain cache sibling')
 [IO.File]::WriteAllText((Join-Path $install 'state\openclaw\npm\installation-record.json'),'{"plugin":"codex","version":"2026.10.3"}')
 [IO.File]::WriteAllText((Join-Path $install 'projects\user-project.txt'),'preserve actual project')
 function Get-NetTCPConnection {param($State,$LocalPort,$ErrorAction);return @()}
@@ -30,6 +38,13 @@ if(@($manifest.excluded | Where-Object {$_.path -eq 'state\openclaw\plugin-skill
 if(Test-Path -LiteralPath (Join-Path $snapshot 'state\openclaw\plugin-skills')){throw 'Generated cache was copied.'}
 if(@($manifest.excluded | Where-Object {$_.path -eq 'state\openclaw\npm\projects'}).Count -ne 1){throw 'Generated npm project exclusion not recorded.'}
 if(Test-Path -LiteralPath (Join-Path $snapshot 'state\openclaw\npm\projects')){throw 'Generated npm runtime projects were copied.'}
+foreach($cache in @('state\openclaw\tmp\plugin-captures','state\openclaw\sandbox\skills-workspaces','state\openclaw\cache\control-ui-assets')) {
+    if(@($manifest.excluded | Where-Object {$_.path -eq $cache}).Count -ne 1){throw "Exclusion not recorded: $cache"}
+    if(Test-Path -LiteralPath (Join-Path $snapshot $cache)){throw "Generated cache copied: $cache"}
+}
+foreach($sibling in @('state\openclaw\tmp\retained-sibling.txt','state\openclaw\sandbox\retained-sibling.txt','state\openclaw\cache\retained-sibling.txt')) {
+    if(-not (Test-Path -LiteralPath (Join-Path $snapshot $sibling))){throw "Non-cache sibling lost: $sibling"}
+}
 if(-not (Test-Path -LiteralPath (Join-Path $snapshot 'state\openclaw\npm\installation-record.json'))){throw 'Npm metadata outside generated projects was lost.'}
 if((Get-Content -LiteralPath (Join-Path $snapshot 'projects\user-project.txt') -Raw) -ne 'preserve actual project'){throw 'Actual user project was excluded.'}
 if(@($manifest.files | Where-Object {$_.path -match 'outside.txt'}).Count -gt 0){throw 'An external junction target was copied.'}
@@ -40,6 +55,7 @@ foreach($file in $manifest.files) {
 Write-Output 'PASS: generated cache with an external junction and a cycle is excluded without following links.'
 Write-Output 'PASS: exclusion is recorded; user skills are preserved; copied files verify against the manifest.'
 Write-Output 'PASS: generated npm dependency projects with host-package links/cycles are excluded; npm metadata and actual user projects are preserved.'
+Write-Output 'PASS: temporary captures, sandbox skill workspaces and UI asset cache links/cycles are excluded; sibling state is retained.'
 
 New-Item -ItemType Junction -Path (Join-Path $install 'projects\unexpected-link') -Target $external | Out-Null
 $before=@(Get-ChildItem -LiteralPath $backup -Directory | Select-Object -ExpandProperty FullName)
