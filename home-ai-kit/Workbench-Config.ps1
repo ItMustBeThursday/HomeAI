@@ -9,6 +9,10 @@ function Set-HomeAIWorkbenchConfig($Config,$Settings,$Roles,[switch]$Disabled) {
         $Config.tools.allow=@($Config.tools.allow | Where-Object {$_ -notin @('homeai_project','homeai_task','homeai_specialist')})
         return $Config
     }
+    # The minimal profile filters plugin tools out before the explicit allowlist
+    # is evaluated. The finite allowlist remains the permission boundary.
+    $Config.tools | Add-Member -NotePropertyName profile -NotePropertyValue 'full' -Force
+    $Config.tools | Add-Member -NotePropertyName toolSearch -NotePropertyValue $false -Force
     if($Config.plugins.PSObject.Properties['allow']){$Config.plugins.allow=@($Config.plugins.allow)+@('homeai-workbench') | Select-Object -Unique}
     $Config.tools.allow=@($Config.tools.allow)+@('homeai_project','homeai_task','homeai_specialist') | Select-Object -Unique
     foreach($role in @('quick','vision')) {

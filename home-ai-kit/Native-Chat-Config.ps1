@@ -27,6 +27,12 @@ function Enable-HomeAINativeChatConfig($Config,$Settings,[string]$Primary='Codex
     if($Config.PSObject.Properties['plugins'] -and $Config.plugins.PSObject.Properties['entries'] -and
         $Config.plugins.entries.PSObject.Properties['homeai-workbench'] -and $Config.plugins.entries.'homeai-workbench'.enabled) {
         $Config.tools.allow+=@('homeai_project','homeai_task','homeai_specialist')
+        $Config.tools.profile='full'
+        $Config.tools | Add-Member -NotePropertyName toolSearch -NotePropertyValue $false -Force
+    }
+    if($Config.PSObject.Properties['plugins'] -and $Config.plugins.PSObject.Properties['entries'] -and
+        $Config.plugins.entries.PSObject.Properties['homeai-jobs'] -and $Config.plugins.entries.'homeai-jobs'.enabled) {
+        $Config.tools.allow+= 'homeai_job'
     }
     # deny/allowlist also block Codex app-server runtime admission. Use the
     # human approval route while the finite tool list and read-only sandbox

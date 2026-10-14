@@ -27,7 +27,7 @@
     "voice",
     "assistive hardware"
   ],
-  "autonomousContinuationImplemented": false,
+  "autonomousContinuationImplemented": "bounded queued project-file jobs while HomeAI is running; system self-installation and unattended reboot startup are not enabled",
   "workbench": {
     "installer": "Enable-HomeAIWorkbench.ps1",
     "status": "ready-for-target-validation",
@@ -44,5 +44,18 @@
     "firstExperiment": "Qwen/Qwen3-4B-Instruct-2507",
     "mainModelReplacement": false,
     "nextStep": "Use target native PyTorch/HIP probe to select an isolated compatible environment; then run a separate model experiment and benchmark before importing."
+  },
+  "jobs": {
+    "status": "ready-for-target-validation",
+    "installer": "Enable-HomeAIJobs.ps1",
+    "uncertainDispatchAutoReplay": false,
+    "automaticWindowsStartup": false,
+    "shellAndTestsEnabled": false,
+    "features": [
+      "bounded persistent project-file jobs",
+      "project-bound worker tools",
+      "pause/resume",
+      "output hashes and review status"
+    ]
   }
 }

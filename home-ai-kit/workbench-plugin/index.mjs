@@ -32,7 +32,7 @@ async function atomicJson(file,value) {
   await fsp.writeFile(tmp,JSON.stringify(value,null,2),{flag:'wx'});
   await fsp.rename(tmp,file);
 }
-export function createWorkbench(root,fetchImpl=fetch) {
+export function createWorkbench(root,fetchImpl=fetch,options={}) {
   const settings=JSON.parse(fs.readFileSync(path.join(root,'homeai.json'),'utf8').replace(/^\uFEFF/,''));
   if(settings.owner!=='home-ai-kit-v1'||path.resolve(settings.root)!==path.resolve(root))throw Error('HomeAI ownership differs.');
   let tail=Promise.resolve();
@@ -54,6 +54,7 @@ export function createWorkbench(root,fetchImpl=fetch) {
   }
   async function project(p) {
     const project=projectName(p.project);
+    if(options.projectScope&&project!==options.projectScope)throw Error('This job is limited to its selected project.');
     const base=await safePath(root,'projects',project);
     if(p.action==='list') {
       let names=[];try{names=await fsp.readdir(base,{withFileTypes:true});}catch(e){if(e.code!=='ENOENT')throw e;}
@@ -119,6 +120,7 @@ export function createWorkbench(root,fetchImpl=fetch) {
     if(!current||current.digest!==route.digest)throw Error('Specialist model is missing or changed; rerun the installer to review its pin.');
     const message={role:'user',content:p.prompt};
     if(p.imageFile) {
+      if(options.projectScope&&p.project!==options.projectScope)throw Error('This job cannot read images in another project.');
       const file=await safePath(root,'projects',projectName(p.project),...parts(p.imageFile));
       const info=await fsp.stat(file);if(!info.isFile()||info.size>8*1024*1024||! /\.(png|jpe?g|webp)$/i.test(file))throw Error('Use a PNG/JPEG/WebP project image below 8 MiB.');
       message.images=[(await fsp.readFile(file)).toString('base64')];
@@ -140,5 +142,17 @@ export function createWorkbench(root,fetchImpl=fetch) {
 }
 export default {id:'homeai-workbench',name:'HomeAI Workbench',register(api) {
   const root=api.pluginConfig?.root;if(typeof root!=='string'||! /^[A-Za-z]:[\\/]/.test(root))throw Error('Configure an absolute Windows HomeAI root.');
-  for(const tool of createWorkbench(root))api.registerTool(tool,{optional:true});
+  const mainTools=createWorkbench(root);
+  api.registerTool(ctx=>{
+    if(ctx.agentId!=='homeai-worker'&&!ctx.sessionKey?.startsWith('agent:homeai-worker:'))return mainTools;
+    const match=/^agent:homeai-worker:homeai-job-([a-f0-9-]{36})$/.exec(ctx.sessionKey||'');
+    if(!match)return null;
+    const file=path.join(root,'state','jobs','records',match[1]+'.json');
+    try{
+      let cursor=file;while(true){const s=fs.lstatSync(cursor);if(s.isSymbolicLink()||(s.isFile()&&s.nlink>1))return null;const parent=path.dirname(cursor);if(parent===cursor)break;cursor=parent;}
+      const job=JSON.parse(fs.readFileSync(file,'utf8'));
+      if(job.owner!=='home-ai-job-v1'||job.id!==match[1]||! /^[a-z0-9][a-z0-9_-]{0,63}$/.test(job.project))return null;
+      return createWorkbench(root,fetch,{projectScope:job.project});
+    }catch{return null;}
+  },{optional:true,names:['homeai_project','homeai_task','homeai_specialist']});
 }};

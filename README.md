@@ -51,6 +51,25 @@ Heretic is deliberately separate: its script stages the official source at a rec
 
 References: [Heretic](https://github.com/p-e-w/heretic), [Gemma model tag](https://ollama.com/library/gemma4:e4b-it-q4_K_M), [Qwen vision tag](https://ollama.com/library/qwen3-vl:4b-instruct-q4_K_M).
 
+## Bounded persistent project jobs
+
+After workbench setup succeeds, run `Enable-HomeAIJobs.ps1` from `home-ai-kit`. It backs up, upgrades the owned workbench plugin to 0.2.0 for per-job project scoping, installs the local job service and adds a narrowly allowlisted `homeai-worker` agent. No model downloads, new subscription login or Linux distribution are involved.
+
+In a new chat, ask: "Submit a 2-step job in project jobs-demo to create README.md explaining HomeAI. Expected output: README.md." The `homeai_job` tool requires a named project, a goal, 1-20 expected files and a 1-6 step limit. Workers inherit the configured Codex/Claude/Qwen route; real hosted availability must be checked on the target. Only the selected project's file tool, task notes and local specialists are exposed. Shell, code/test execution, messaging, purchases, publishing and system installation are not added.
+
+Use `/homeai_jobs` for status without model inference. Jobs save progress, native result envelopes and file evidence under `D:\HomeAI\state\jobs`. A successful job is **ready-for-review**, not tested/completed. Verification checks expected files exist, are nonempty and records hashes; it does not certify correctness or quality. A missing output stops for review. Pause takes effect at a turn boundary. Interrupted/uncertain dispatches are not replayed automatically: inspect the recorded native session and project files before explicitly resuming. Resume grants two more steps, bounded by 12 total steps.
+
+Queued jobs resume when HomeAI starts. Windows login/autostart is not configured. Background jobs share your subscription/GPU resources; the service runs one job at a time. `/homeai_jobs` displays the latest 100 records; the worker considers the full queue. For direct pause/resume when the model is busy:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File D:\HomeAI\scripts\Manage-HomeAIJobs.ps1 -Action list
+powershell -NoProfile -ExecutionPolicy Bypass -File D:\HomeAI\scripts\Manage-HomeAIJobs.ps1 -Action pause -Id YOUR-JOB-ID
+```
+
+The fixed workbench configuration preserves one-item input arrays under PS5.1 and a valid plugin root during rollback. Its finite tool allowlist is applied with the full base profile; the minimal profile previously filtered out plugin tools. Direct tool schemas are used for this small toolkit. This enables only the explicitly listed tools, with Codex's native read-only sandbox retained.
+
+Validation: Windows PowerShell parsing/configuration and cross-process lock tests pass. An actual pinned OpenClaw Gateway with a synthetic localhost model dispatched a job through the registered, project-bound file tool and saved output evidence. No hosted inference or real model weights were used in that development test.
+
 ## Separate prompt helpers
 
 `Connect-Codex.ps1` and `Connect-Claude.ps1` also support standalone PowerShell prompt workers. The standalone Codex connector discovers the installed executable and uses a private profile; it is separate from the official OpenClaw harness.
@@ -84,6 +103,7 @@ node tests\test-native.mjs
 References: [Claude CLI backend](https://docs.openclaw.ai/gateway/cli-backends), [Codex harness](https://docs.openclaw.ai/plugins/codex-harness), [Harness configuration](https://docs.openclaw.ai/plugins/codex-harness/configuration).
 
 Only generic source is published. Credentials, runtime state, personal proposals, model files, backups and test artifacts are excluded.
+
 
 
 
