@@ -21,6 +21,14 @@ function Add-HomeAIBackupEntry([string]$Source,[string]$Relative) {
         $excluded.Add(@{path=$Relative;reason='OpenClaw-generated plugin skill links; regenerated from installed plugins'})
         return
     }
+    # OpenClaw's npm installer builds isolated dependency projects here.
+    # They contain links back to the installed host package. These are runtime
+    # dependencies, not user projects or session state. Exclude this exact
+    # generated subtree before enumeration, preserving npm metadata elsewhere.
+    if ($Relative -ieq 'state\openclaw\npm\projects') {
+        $excluded.Add(@{path=$Relative;reason='OpenClaw-generated npm dependency projects and host-package links; reinstall recorded plugin packages to restore runtimes'})
+        return
+    }
     $item = Get-Item -LiteralPath $Source -Force
     if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
         throw "Backup refuses unrecognized link outside the generated cache: $Source"
@@ -60,5 +68,5 @@ Write-HomeAIJson (Join-Path $destination 'backup-manifest.json') @{
     createdAt=(Get-Date).ToUniversalTime().ToString('o');files=@($hashes.ToArray());
     excluded=@($excluded.ToArray());modelsExcluded=$true;verified=$true
 }
-Write-Host "Verified backup: $destination (models, runtimes and generated plugin-skill links excluded)."
+Write-Host "Verified backup: $destination (models, runtimes, generated plugin-skill links and npm dependency projects excluded)."
 return $destination

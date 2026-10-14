@@ -28,7 +28,7 @@ If the dashboard says Codex local execution is unavailable because `tools.exec.m
 powershell -NoProfile -ExecutionPolicy Bypass -File .\Repair-HomeAIChatPolicy.ps1
 ```
 
-The repair stops owned services, verifies a backup, changes requested and host policy to the human-approval `cautious` preset, and restarts HomeAI. It retains existing model routes, the finite memory/history tool list, and the read-only Codex sandbox. It does not reinstall clients or repeat account login. The previous deny-all policy also blocked Codex runtime admission checks.
+The repair stops owned services, verifies a backup, changes requested and host policy to the human-approval `cautious` preset, and restarts HomeAI. It retains existing model routes, the finite memory/history tool list, and the read-only Codex sandbox. It does not reinstall clients or repeat account login. Backups exclude the exact generated `state\openclaw\npm\projects` dependency subtree, alongside the plugin-skill cache, and record these exclusions in the manifest. Configuration, conversations, npm metadata outside that subtree and actual user projects are preserved. Excluded runtimes require reinstalling their recorded plugin packages during a restore. The previous deny-all policy also blocked Codex runtime admission checks.
 
 Claude is normally a fallback, rather than a separate chat window. To test it, send `/model anthropic/claude-opus-5-5`, then a short prompt and `/status`. Confirm the actual runtime is Claude Code, because a fallback may answer instead. Restore Codex with `/model openai/gpt-6-astra`.
 
@@ -65,5 +65,6 @@ node tests\test-native.mjs
 References: [Claude CLI backend](https://docs.openclaw.ai/gateway/cli-backends), [Codex harness](https://docs.openclaw.ai/plugins/codex-harness), [Harness configuration](https://docs.openclaw.ai/plugins/codex-harness/configuration).
 
 Only generic source is published. Credentials, runtime state, personal proposals, model files, backups and test artifacts are excluded.
+
 
 

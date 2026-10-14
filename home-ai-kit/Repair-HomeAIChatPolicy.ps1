@@ -27,7 +27,7 @@ Invoke-HomeAINative $node @($claw,'config','validate')
 # approval route, the fallback remains deny. Never use the yolo preset here.
 Invoke-HomeAINative $node @($claw,'exec-policy','preset','cautious')
 Invoke-HomeAINative $node @($claw,'exec-policy','show')
-foreach($name in @('Common.ps1','Native-Chat-Config.ps1','Connect-OpenClawChat.ps1','Repair-HomeAIChatPolicy.ps1','Stop-HomeAI.ps1')) {
+foreach($name in @('Common.ps1','Backup-HomeAI.ps1','Native-Chat-Config.ps1','Connect-OpenClawChat.ps1','Repair-HomeAIChatPolicy.ps1','Stop-HomeAI.ps1')) {
     $source=Join-Path $PSScriptRoot $name
     $target=Assert-HomeAIChild (Join-Path $settings.root ('scripts\'+$name)) $settings.root
     if($source -ne $target){Copy-Item -LiteralPath $source -Destination $target -Force}
