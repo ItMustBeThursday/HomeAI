@@ -1,0 +1,26 @@
+{
+  "researchedOn": "2026-10-14",
+  "ollama": {
+    "version": "0.40.4",
+    "url": "https://github.com/ollama/ollama/releases/download/v0.40.4/ollama-windows-amd64.zip",
+    "sha256": "7485a1172f8527db4342a63521b9342fc466185ff0855da378cc864ecf6354cf"
+  },
+  "ollamaAmd": {
+    "url": "https://github.com/ollama/ollama/releases/download/v0.40.4/ollama-windows-amd64-rocm.zip",
+    "sha256": "3098b22bf167767ed7967f8621ba958dda862e88f4c894b9e561bf5b44cfb556"
+  },
+  "node": {
+    "version": "24.21.0",
+    "url": "https://nodejs.org/dist/v24.21.0/node-v24.21.0-win-x64.zip",
+    "sha256": "158f7685b44de51f6c0df1d153526cbcd3e1bc739a8dfc607721cef75de9e541"
+  },
+  "git": {
+    "version": "2.56.0.2",
+    "url": "https://github.com/git-for-windows/git/releases/download/v2.56.0.windows.2/MinGit-2.56.0.2-64-bit.zip",
+    "sha256": "da35e72aa21c005a5a0d298cfbae110bc1609a815730ea0dde84b01a1b3cd3be"
+  },
+  "openclaw": { "version": "2026.10.3" },
+  "mainModel": "qwen3.8:27b-q4_K_M",
+  "comparisonModels": ["gemma4:26b", "gpt-oss:20b"],
+  "fastModel": "gemma4:e4b-it-q4_K_M"
+}

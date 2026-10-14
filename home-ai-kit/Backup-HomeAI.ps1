@@ -1,0 +1,64 @@
+#Requires -Version 5.1
+param([string]$Root='D:\HomeAI')
+. (Join-Path $PSScriptRoot 'Common.ps1')
+$settings = Get-HomeAISettings $Root
+$backupRoot = Get-HomeAIPath $settings.backupRoot
+$destination = Assert-HomeAIChild (Join-Path $backupRoot ((Get-Date -Format 'yyyyMMdd-HHmmss')+'-'+[guid]::NewGuid().ToString('N').Substring(0,8))) $backupRoot
+# SQLite and other state must be copied while the gateway is stopped.
+$node = Get-HomeAINode $settings
+if (@(Get-NetTCPConnection -State Listen -LocalPort $settings.gatewayPort -ErrorAction SilentlyContinue).Count -gt 0) {
+    throw 'Stop-HomeAI.ps1 must be run before making a consistent backup. No live SQLite files were copied.'
+}
+New-Item -ItemType Directory -Path $destination -Force | Out-Null
+$entries = New-Object 'Collections.Generic.List[object]'
+$excluded = New-Object 'Collections.Generic.List[object]'
+
+function Add-HomeAIBackupEntry([string]$Source,[string]$Relative) {
+    # OpenClaw owns this directory and regenerates its plugin-skill junctions.
+    # Do not enumerate it or follow any of its targets. User skills elsewhere
+    # remain in the backup. Unexpected links outside this cache still fail closed.
+    if ($Relative -ieq 'state\openclaw\plugin-skills') {
+        $excluded.Add(@{path=$Relative;reason='OpenClaw-generated plugin skill links; regenerated from installed plugins'})
+        return
+    }
+    $item = Get-Item -LiteralPath $Source -Force
+    if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+        throw "Backup refuses unrecognized link outside the generated cache: $Source"
+    }
+    Assert-HomeAIChild $Source $settings.root | Out-Null
+    $entries.Add(@{source=$Source;relative=$Relative;directory=[bool]$item.PSIsContainer})
+    if ($item.PSIsContainer) {
+        # Inspect one level at a time: recursive enumeration/copy could follow a
+        # Windows junction before we have had a chance to reject or exclude it.
+        foreach ($child in Get-ChildItem -LiteralPath $Source -Force) {
+            Add-HomeAIBackupEntry $child.FullName (Join-Path $Relative $child.Name)
+        }
+    }
+}
+
+foreach ($name in @('homeai.json','state','workspace','projects','output','scripts','evaluations')) {
+    $source = Assert-HomeAIChild (Join-Path $settings.root $name) $settings.root
+    if (Test-Path -LiteralPath $source) { Add-HomeAIBackupEntry $source $name }
+}
+$hashes = New-Object 'Collections.Generic.List[object]'
+foreach ($entry in $entries) {
+    # Recheck both paths immediately before copying, including all ancestors.
+    Assert-HomeAIChild $entry.source $settings.root | Out-Null
+    $target = Assert-HomeAIChild (Join-Path $destination $entry.relative) $backupRoot
+    if ($entry.directory) {
+        New-Item -ItemType Directory -Path $target -Force | Out-Null
+    } else {
+        $sourceHash = (Get-FileHash -LiteralPath $entry.source -Algorithm SHA256).Hash
+        Copy-Item -LiteralPath $entry.source -Destination $target -Force
+        $copiedHash = (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash
+        if ($copiedHash -ne $sourceHash) { throw "Backup verification failed: $($entry.relative)" }
+        $hashes.Add(@{path=$entry.relative;sha256=$copiedHash})
+    }
+}
+# A failed or incomplete snapshot has no completion manifest.
+Write-HomeAIJson (Join-Path $destination 'backup-manifest.json') @{
+    createdAt=(Get-Date).ToUniversalTime().ToString('o');files=@($hashes.ToArray());
+    excluded=@($excluded.ToArray());modelsExcluded=$true;verified=$true
+}
+Write-Host "Verified backup: $destination (models, runtimes and generated plugin-skill links excluded)."
+return $destination

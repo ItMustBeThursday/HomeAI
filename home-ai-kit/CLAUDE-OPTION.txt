@@ -1,0 +1,43 @@
+CLAUDE PRO CONNECTOR - October 14, 2026
+
+Connect-Claude.ps1 installs the pinned official native Claude Code 2.1.299,
+verifies npm lock integrity/source and the executable hash, and opens native
+subscription login in a private profile. Claude Desktop login may not sign this
+profile in. The foundation and Continue scripts do not install Claude.
+
+Run in the new extracted folder:
+  powershell -NoProfile -ExecutionPolicy Bypass -File .\Connect-Claude.ps1
+
+Keep paid extra usage disabled in Claude billing and type OFF when asked.
+Subscription login cannot prove that billing setting. No API key or automatic
+additional-credit purchase is configured.
+
+Try:
+  powershell -NoProfile -ExecutionPolicy Bypass -File D:\HomeAI\scripts\Ask-HomeAI.ps1 -Mode BestAvailable -Provider Claude -Prompt "Draft a short project brief"
+
+As explicitly requested, outbound inference no longer asks you to type SEND.
+The router tries Claude, then connected Codex, then local Qwen. Change preference
+with -Provider Codex; Codex is now the default BestAvailable preference.
+Actual usage-limit rejection creates a five-minute retry cooldown, not a claimed
+quota reset. Missing login, launch failures and incomplete requests fall through.
+No precise remaining-token meter or answer-quality comparison is assumed.
+
+This first bridge passes only your supplied prompt, disables native Claude tools
+and MCP, and does not attach project files, local memory or desktop conversations.
+Messaging, purchases, publishing and other external actions still require
+approval. Deletion of project files still requires a verified backup.
+Neither hosted worker is registered in the OpenClaw chat UI by this package.
+
+Claude login lives under LOCALAPPDATA\HomeAI-Claude outside project backups.
+Do not publish it. The package-lock parser uses Node because PowerShell 5.1
+cannot parse npm's empty packages property. Re-running after the previous
+lockfile error reuses the downloaded official package.
+
+Pro includes Claude Code and has usage limits; it is not unlimited automation.
+Ordinary Claude Console API billing is separate. Use the documented native
+subscription route and your own subscribed claude.ai account.
+
+Sources:
+https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan
+https://support.claude.com/en/articles/8325606-what-is-the-pro-plan
+https://docs.openclaw.ai/gateway/cli-backends

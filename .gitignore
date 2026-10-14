@@ -1,0 +1,20 @@
+# Only generic source is published. Runtime state and private documents stay local.
+/research/
+/output/
+/tests/artifacts/
+/tests/preview-*/
+*.pdf
+*.docx
+*.zip
+*.log
+*.sqlite*
+auth.json
+.env*
+node_modules/
+/runtime/
+/models/
+/state/
+/workspace/
+/projects/
+/HomeAI-Claude/
+/HomeAI-Codex/
