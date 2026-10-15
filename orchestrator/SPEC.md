@@ -36,7 +36,7 @@ Entry shape: `{ ts: number(ms), connector: string, taskType: string, inputTokens
 
 ## Module 3: src/connectors/cli.mjs
 - `buildClaudeArgs({ prompt, model, systemPrompt, tools = [], maxTurns = 1 })` → argv array (no shell quoting), per facts above; `--tools` followed by `""`-equivalent empty string when tools empty, else comma-joined.
-- `parseClaudeJson(stdout)` → `{ text, inputTokens, outputTokens, costUsd, ok }` from Claude's JSON result object (`result`, `usage.input_tokens`, `usage.output_tokens`, `total_cost_usd`, `is_error`). Missing usage → 0.
+- `parseClaudeJson(stdout)` → `{ text, inputTokens, outputTokens, costUsd, ok }` from Claude's JSON result object (`result`, `usage.input_tokens` + `usage.cache_creation_input_tokens` + `usage.cache_read_input_tokens`, `usage.output_tokens`, `total_cost_usd`, `is_error`). Missing usage → 0. Cache tokens count fully toward budgets.
 - `buildCodexArgs({ prompt, model, sandbox = "read-only" })` → argv array starting with `exec`.
 - `parseCodexJsonl(stdout)` → `{ text, inputTokens, outputTokens, costUsd: null, ok }`; text = last agent message text found in events; usage from any event with `usage.input_tokens`/`usage.output_tokens` (take the last). Ignore unparseable lines.
 - `buildOllamaRequest({ model, prompt, system })` → `{ url: "http://127.0.0.1:11435/api/chat", body: { model, stream: false, messages: [...] } }`.

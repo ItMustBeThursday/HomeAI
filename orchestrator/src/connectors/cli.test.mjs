@@ -24,6 +24,8 @@ test('buildClaudeArgs joins tools and sets turns; omits system prompt when absen
 test('parseClaudeJson extracts text, usage and cost', () => {
   const out = JSON.stringify({ result: 'done', usage: { input_tokens: 12, output_tokens: 3 }, total_cost_usd: 0.01, is_error: false });
   assert.deepEqual(parseClaudeJson(out), { text: 'done', inputTokens: 12, outputTokens: 3, costUsd: 0.01, ok: true });
+  const cached = JSON.stringify({ result: 'r', usage: { input_tokens: 2, cache_creation_input_tokens: 100, cache_read_input_tokens: 900, output_tokens: 4 } });
+  assert.equal(parseClaudeJson(cached).inputTokens, 1002);
   assert.deepEqual(parseClaudeJson('{"result":"x","is_error":true}'), { text: 'x', inputTokens: 0, outputTokens: 0, costUsd: null, ok: false });
   assert.throws(() => parseClaudeJson('not json'), /JSON/);
 });
@@ -31,6 +33,12 @@ test('parseClaudeJson extracts text, usage and cost', () => {
 test('buildCodexArgs', () => {
   assert.deepEqual(buildCodexArgs({ prompt: 'p', model: 'gpt-5' }), ['exec', '--json', '--ephemeral', '--skip-git-repo-check', '-m', 'gpt-5', '-s', 'read-only', 'p']);
   assert.throws(() => buildCodexArgs({ prompt: 'p', model: 'm', sandbox: 'danger-full-access' }), /sandbox/);
+});
+
+test('stdinPrompt keeps the prompt out of argv', () => {
+  const c = buildClaudeArgs({ model: 'haiku', stdinPrompt: true });
+  assert.deepEqual(c.slice(0, 2), ['-p', '--output-format']);
+  assert.equal(buildCodexArgs({ model: 'm', stdinPrompt: true }).at(-1), '-');
 });
 
 test('parseCodexJsonl takes last agent message and last usage, skipping junk', () => {

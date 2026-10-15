@@ -7,12 +7,14 @@ const need = (v, name) => {
 };
 const num = (v) => (Number.isFinite(v) ? v : 0);
 
-export function buildClaudeArgs({ prompt, model, systemPrompt, tools = [], maxTurns = 1 } = {}) {
-  need(prompt, 'prompt');
+// stdinPrompt: leave the prompt out of argv; the caller pipes it on stdin (no command-line length/quoting limits).
+export function buildClaudeArgs({ prompt, model, systemPrompt, tools = [], maxTurns = 1, stdinPrompt = false } = {}) {
+  if (!stdinPrompt) need(prompt, 'prompt');
   need(model, 'model');
   if (!Array.isArray(tools)) throw new Error('tools must be an array');
   if (!Number.isInteger(maxTurns) || maxTurns < 1) throw new Error('maxTurns must be a positive integer');
-  const args = ['-p', prompt, '--output-format', 'json', '--model', model];
+  const args = stdinPrompt ? ['-p'] : ['-p', prompt];
+  args.push('--output-format', 'json', '--model', model);
   if (systemPrompt !== undefined) {
     if (typeof systemPrompt !== 'string') throw new Error('systemPrompt must be a string');
     args.push('--system-prompt', systemPrompt);
@@ -29,20 +31,22 @@ export function parseClaudeJson(stdout) {
     throw new Error('Claude output is not valid JSON');
   }
   if (r === null || typeof r !== 'object') throw new Error('Claude output is not a JSON object');
+  // Prompt-cache reads/writes count fully toward input: that is what subscription limits consume.
+  const u = r.usage ?? {};
   return {
     text: typeof r.result === 'string' ? r.result : '',
-    inputTokens: num(r.usage?.input_tokens),
+    inputTokens: num(u.input_tokens) + num(u.cache_creation_input_tokens) + num(u.cache_read_input_tokens),
     outputTokens: num(r.usage?.output_tokens),
     costUsd: Number.isFinite(r.total_cost_usd) ? r.total_cost_usd : null,
     ok: r.is_error !== true,
   };
 }
 
-export function buildCodexArgs({ prompt, model, sandbox = 'read-only' } = {}) {
-  need(prompt, 'prompt');
+export function buildCodexArgs({ prompt, model, sandbox = 'read-only', stdinPrompt = false } = {}) {
+  if (!stdinPrompt) need(prompt, 'prompt');
   need(model, 'model');
   if (!['read-only', 'workspace-write'].includes(sandbox)) throw new Error(`Unsupported codex sandbox "${sandbox}"`);
-  return ['exec', '--json', '--ephemeral', '--skip-git-repo-check', '-m', model, '-s', sandbox, prompt];
+  return ['exec', '--json', '--ephemeral', '--skip-git-repo-check', '-m', model, '-s', sandbox, stdinPrompt ? '-' : prompt];
 }
 
 // Accepts both current ({type:"item.completed", item:{type:"agent_message", text}}) and older

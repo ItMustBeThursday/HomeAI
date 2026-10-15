@@ -1,0 +1,19 @@
+{
+  "connectors": {
+    "local-fast": { "kind": "ollama", "model": "homeai-fast:locked" },
+    "local-main": { "kind": "ollama", "model": "homeai-main:locked" },
+    "local-coder": { "kind": "ollama", "model": "homeai-coder:locked" },
+    "claude-haiku": { "kind": "claude-cli", "model": "haiku" },
+    "claude-sonnet": { "kind": "claude-cli", "model": "sonnet" },
+    "claude-opus": { "kind": "claude-cli", "model": "opus" },
+    "codex": { "kind": "codex-cli", "model": "gpt-6.1-sol" }
+  },
+  "routes": {
+    "quick": { "chain": ["local-fast", "claude-haiku"] },
+    "general": { "chain": ["local-main", "claude-sonnet"] },
+    "coding": { "chain": ["codex", "local-coder", "claude-sonnet"] },
+    "review": { "chain": ["claude-sonnet", "local-main"] },
+    "planning": { "chain": ["claude-opus", "claude-sonnet", "local-main"] }
+  },
+  "default": "general"
+}
