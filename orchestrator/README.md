@@ -7,15 +7,17 @@ A lean local replacement for OpenClaw. It routes each task to the right model (l
 - Tests: `node --test` (each `src/**/*.mjs` module has a `*.test.mjs`)
 
 ## Status
-- **Phase 1 core: done (2026-10-15).** `src/router.mjs`, `src/ledger.mjs` and `src/connectors/cli.mjs` are written, and 19 offline tests pass (`npm test`). `node scripts/smoke.mjs ollama claude` checks the parsers against real output. Ollama and Claude have been verified live; Codex hasn't been run live yet.
+- **Phase 1 core: done (2026-10-15).** `src/router.mjs`, `src/ledger.mjs` and `src/connectors/cli.mjs` are written, and 19 offline tests pass (`npm test`). `node scripts/smoke.mjs ollama claude` checks the parsers against real output. Ollama and Claude have been verified live; Codex was verified live through `/api/task` on 2026-10-15 (`gpt-6.1-sol`, reply `OK`). The direct Codex smoke check remains blocked in the Codex sandbox by home-directory/profile access.
 - Claude prompt-cache reads/writes count fully as input tokens (decided 2026-10-15).
 - **Phase 2 service: done (2026-10-15).** 41 offline tests pass. Verified live through the API:
   - Claude Sonnet and Haiku answered.
   - Haiku took over automatically when the local model was busy.
   - The usage log on disk recorded every attempt.
 
-  Codex hasn't been run live yet.
+  Codex was verified live through `/api/task` on 2026-10-15 (`gpt-6.1-sol`, reply `OK`). The direct Codex smoke check remains blocked in the Codex sandbox by home-directory/profile access.
+- **Operations (2026-10-15): done.** Autostart at logon (scheduled task), in-service scheduler with nightly backup, per-backend request queue, log rotation, Schedule tab. 77 offline tests pass; verified live (Codex `OK` via `gpt-6.1-sol`, local Ollama, real backup run).
 - **Phase 5 WebUI v1: done (2026-10-15).** Open http://127.0.0.1:18850. Tabs: Chat (saved multi-turn conversations, route picker, pin a model, shows who answered, time, tokens and fallbacks), Usage (totals, budget meters, by model/route), History (every task with prompt, answer and attempts), Status (Claude/Codex/Ollama health, installed/loaded models), Config (edit routes and budgets with validation, live reload, automatic backups), Logan (placeholder for Phase 3). 58 offline tests pass; chat verified live with Claude Haiku, including a follow-up turn.
+- **Codex handoff verification (2026-10-15):** 60 offline tests pass. `node scripts/smoke.mjs codex` now uses the service runner (stdin, no shell, subscription environment) and the configured model, and exits nonzero on failure. Run it from Adam's normal user session to finish direct CLI verification. Concurrency limits, log rotation and the scheduler remain pending because the handoff requires stopping at the first blocked task.
 - Next: Phase 3 (Logan), then Phase 4 (MCP). See "Still to do" in [SPEC.md](SPEC.md).
 
 ## Running
@@ -24,7 +26,7 @@ A lean local replacement for OpenClaw. It routes each task to the right model (l
 .\scripts\start.ps1 -Foreground  # or: node src/main.mjs
 .\scripts\backup-data.ps1        # copies data\ and config\ to D:\HomeAI\backups\orchestrator\<timestamp>
 ```
-Environment overrides: `HOMEAI_ORCH_PORT`, `HOMEAI_ORCH_TOKEN` (bearer token required for everything except `/api/health`), `HOMEAI_ORCH_ROUTES`, `HOMEAI_ORCH_BUDGETS`, `HOMEAI_ORCH_DATA`, `HOMEAI_CLAUDE_BIN`, `HOMEAI_CODEX_SCRIPT`, `HOMEAI_OLLAMA_URL`.
+Environment overrides: `HOMEAI_ORCH_PORT`, `HOMEAI_ORCH_TOKEN` (bearer token required for everything except `/api/health`), `HOMEAI_ORCH_ROUTES`, `HOMEAI_ORCH_BUDGETS`, `HOMEAI_ORCH_SCHEDULE`, `HOMEAI_ORCH_DATA`, `HOMEAI_CLAUDE_BIN`, `HOMEAI_CODEX_SCRIPT`, `HOMEAI_OLLAMA_URL`.
 
 Config: `config/routes.json` (connectors and fallback chains per task type) and `config/budgets.json` (daily caps). Both can be edited in the WebUI; the previous version is kept in `data/config-backups` (newest 50).
 
@@ -42,6 +44,8 @@ Local data (never goes to GitHub; back it up with `scripts/backup-data.ps1`):
 | PUT | `/api/config/budgets` | replace budgets.json (cap names must match connectors/routes) |
 | GET | `/api/usage?hours=24` | totals by connector and by task type, plus `caps[]` with 24h used/limit |
 | GET | `/api/status[?fresh=1]` | backend and per-connector health (cached 30 s) |
+| GET | `/api/schedule` | scheduler on/off, jobs with last run, and the request queue per backend |
+| POST | `/api/schedule/run` | `{name}` run a job now (works even when the scheduler is off) |
 | GET | `/api/history?limit=50` | recent tasks, newest first |
 | POST | `/api/task` | `{taskType?, prompt, system?, connector?}` → `{id, ok, text, connector, model, taskType, attempts[], ms}`; `connector` pins one model |
 | POST | `/api/chat` | `{conversationId?, prompt, taskType?, connector?}` → `{conversation, reply}`; omitting the id starts a new chat |

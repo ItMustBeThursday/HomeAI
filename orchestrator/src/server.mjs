@@ -55,7 +55,7 @@ async function userCall(fn) {
 }
 
 // saveConfig(kind, obj) persists an edit ('routes' | 'budgets'); status(config, opts) checks connector health.
-export function createApp({ orchestrator, conversations, saveConfig, status, token, webDir, version = '0.0.0', now = Date.now }) {
+export function createApp({ orchestrator, conversations, scheduler, saveConfig, status, token, webDir, version = '0.0.0', now = Date.now }) {
   const api = {
     'GET /api/health': () => ({ ok: true, version }),
     'GET /api/config': () => {
@@ -93,6 +93,15 @@ export function createApp({ orchestrator, conversations, saveConfig, status, tok
     'POST /api/task': async (req) => {
       const body = await readJson(req);
       return userCall(() => orchestrator.task({ taskType: body.taskType, prompt: body.prompt, system: body.system, connector: body.connector }));
+    },
+    'GET /api/schedule': () => {
+      if (!scheduler) throw new HttpError(404, 'Scheduler is not enabled');
+      return { ...scheduler.list(), queue: orchestrator.queue() };
+    },
+    'POST /api/schedule/run': async (req) => {
+      if (!scheduler) throw new HttpError(404, 'Scheduler is not enabled');
+      const body = await readJson(req);
+      return userCall(() => scheduler.runNow(body.name));
     },
     'POST /api/chat': async (req) => {
       const body = await readJson(req);

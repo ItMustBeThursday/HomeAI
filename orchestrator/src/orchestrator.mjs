@@ -6,7 +6,7 @@ import { buildPrompt } from './history.mjs';
 
 const CHAT_SYSTEM = 'You are HomeAI, a helpful assistant for a family home. Answer clearly and concisely.';
 
-export function createOrchestrator({ config, caps = {}, store, history, conversations, run, now = Date.now, newId = randomUUID }) {
+export function createOrchestrator({ config, caps = {}, store, history, conversations, run, limiter, now = Date.now, newId = randomUUID }) {
   validateRoutes(config);
   validateCaps(caps, { connectors: Object.keys(config.connectors), taskTypes: Object.keys(config.routes) });
   if (typeof run !== 'function') throw new Error('run must be a function');
@@ -44,7 +44,7 @@ export function createOrchestrator({ config, caps = {}, store, history, conversa
       const started = now();
       let out;
       try {
-        out = await run(entry, { prompt, system });
+        out = await (limiter ? limiter.run(entry.kind, () => run(entry, { prompt, system })) : run(entry, { prompt, system }));
       } catch (err) {
         out = { ok: false, error: err.message, inputTokens: 0, outputTokens: 0, costUsd: null };
       }
@@ -86,6 +86,7 @@ export function createOrchestrator({ config, caps = {}, store, history, conversa
     usage: (sinceMs) => summarize(entries, sinceMs),
     budget: (connector, taskType) => checkBudget(entries, caps, connector, taskType, now()),
     capStatus: () => capStatus(entries, caps, now()),
+    queue: () => limiter?.stats() ?? {},
     // Validated before swapping, so a bad edit can't break a running service.
     setConfig(next) {
       validateRoutes(next);

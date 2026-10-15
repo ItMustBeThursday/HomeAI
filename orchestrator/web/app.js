@@ -275,6 +275,32 @@ async function loadStatus(fresh) {
 loaders.status = () => loadStatus(false);
 $('#status-refresh').addEventListener('click', () => loadStatus(true).catch((e) => ($('#status-time').textContent = e.message)));
 
+// ---- Schedule ----
+async function loadSchedule() {
+  const s = await api('/api/schedule');
+  $('#schedule-state').replaceChildren(h('span', { class: `pill ${s.enabled ? 'ok' : 'bad'}` }, s.enabled ? 'Scheduler on' : 'Scheduler off (jobs only run on demand)'));
+  const rows = s.jobs.map((j) => {
+    const r = j.lastRun;
+    const btn = h('button', { class: 'ghost' }, j.running ? 'Running…' : 'Run now');
+    btn.disabled = j.running;
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      btn.textContent = 'Running…';
+      try { await api('/api/schedule/run', { method: 'POST', body: { name: j.name } }); } catch (e) { alert(e.message); }
+      loadSchedule().catch(() => {});
+    });
+    return h('tr', {}, h('td', {}, j.name), h('td', {}, j.dailyAt ? `daily at ${j.dailyAt}` : `every ${j.everyMinutes} min`),
+      h('td', {}, j.enabled === false ? 'disabled' : 'enabled'),
+      h('td', {}, r ? `${when(r.ts)} ${r.ok === undefined ? '' : r.ok ? '✓' : '✗ exit ' + r.code}` : 'never'),
+      h('td', { class: 'muted' }, r?.output ?? ''), h('td', {}, btn));
+  });
+  $('#schedule-jobs').replaceChildren(h('table', {}, h('tr', {}, ['Job', 'When', 'State', 'Last run', 'Output', ''].map((t) => h('th', {}, t))), rows.length ? rows : h('tr', {}, h('td', { colspan: 6, class: 'muted' }, 'No jobs configured'))));
+  const q = Object.entries(s.queue ?? {});
+  $('#schedule-queue').replaceChildren(h('table', {}, h('tr', {}, ['Backend', 'Running', 'Waiting', 'Limit'].map((t) => h('th', {}, t))),
+    q.length ? q.map(([k, v]) => h('tr', {}, h('td', {}, k), h('td', {}, v.active), h('td', {}, v.queued), h('td', {}, v.limit))) : h('tr', {}, h('td', { colspan: 4, class: 'muted' }, 'No requests yet'))));
+}
+loaders.schedule = loadSchedule;
+
 // ---- Config ----
 function routeSummary(cfg) {
   return h('table', {}, h('tr', {}, h('th', {}, 'Route'), h('th', {}, 'Tries in order')),

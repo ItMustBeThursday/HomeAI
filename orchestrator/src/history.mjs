@@ -2,10 +2,11 @@
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync, renameSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { rotateIfLarge } from './rotate.mjs';
 
 const clip = (s, n) => (typeof s === 'string' && s.length > n ? `${s.slice(0, n)}…` : s);
 
-export function createTaskHistory(file, { keep = 1000 } = {}) {
+export function createTaskHistory(file, { keep = 1000, maxBytes = 20_000_000, now = Date.now } = {}) {
   mkdirSync(dirname(file), { recursive: true });
   const records = [];
   try {
@@ -24,6 +25,7 @@ export function createTaskHistory(file, { keep = 1000 } = {}) {
       const r = { ...rec, prompt: clip(rec.prompt, 4000), text: clip(rec.text, 8000) };
       records.push(r);
       if (records.length > keep) records.shift();
+      rotateIfLarge(file, maxBytes, now());
       appendFileSync(file, JSON.stringify(r) + '\n');
       return r;
     },

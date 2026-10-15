@@ -14,6 +14,7 @@
       <button data-tab="usage">Usage</button>
       <button data-tab="history">History</button>
       <button data-tab="status">Status</button>
+      <button data-tab="schedule">Schedule</button>
       <button data-tab="config">Config</button>
       <button data-tab="logan">Logan</button>
     </nav>
@@ -70,6 +71,14 @@
       <div class="toolbar"><button id="status-refresh" class="ghost">Check now</button><span id="status-time" class="muted"></span></div>
       <div id="status-backends" class="cards"></div>
       <div id="status-conn"></div>
+    </section>
+
+    <section id="tab-schedule" class="tab">
+      <p class="muted">Timed jobs run by the service itself (replaces OpenClaw automations). Jobs are defined in <code>config/schedule.json</code>; set <code>"enabled": true</code> there to turn the scheduler on. <b>Run now</b> works either way, so you can test a job.</p>
+      <div id="schedule-state" class="toolbar"></div>
+      <div id="schedule-jobs"></div>
+      <h3>Request queue</h3>
+      <div id="schedule-queue"></div>
     </section>
 
     <section id="tab-config" class="tab">

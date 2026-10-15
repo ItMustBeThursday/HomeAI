@@ -19,9 +19,9 @@ What we will need that isn't built yet, grouped by when it blocks us.
 
 **Blocks OpenClaw cutover**
 - [ ] Standalone Codex install. The service still uses the codex.js inside OpenClaw's folder, so removing OpenClaw would break the `codex` connector.
-- [ ] Codex verified live through the orchestrator (OpenAI quota returns 15:19 ET 2026-10-15).
-- [ ] Auto-start at logon (Windows Scheduled Task running `scripts/start.ps1`). This is a system change, so it needs Adam's approval.
-- [ ] Scheduled jobs (simple timers in-service) to replace OpenClaw automations, starting with a nightly `backup-data.ps1` and later the weekly Logan curation.
+- [x] Codex verified live through the orchestrator: `POST /api/task` pinned to `codex` returned `OK` using `gpt-6.1-sol` on 2026-10-15 (15,927 input / 5 output tokens). Direct CLI smoke remains blocked in the Codex sandbox by home-directory/profile access; rerun `node scripts/smoke.mjs codex` in Adam's normal session.
+- [x] Auto-start at logon: scheduled task `HomeAI-Orchestrator-Autostart` runs `scripts/autostart.ps1` (pins node and claude paths, since a task does not get the interactive PATH). Registered with Adam's approval 2026-10-15; verified all three backends are detected when started that way.
+- [x] In-service scheduler (`src/scheduler.mjs`, `config/schedule.json`, log `data/schedule.jsonl`, Schedule tab, `GET /api/schedule`, `POST /api/schedule/run`). Nightly `backup-data.ps1` at 03:00 is enabled; a missed run catches up once. Still to add later: the weekly Logan curation job, and an LLM-task job type.
 - [ ] Migration checklist: list everything OpenClaw does today that Adam relies on (automations, memory files, channels, Tailscale Funnel exposure, HomeAI jobs), with the replacement for each.
 - [ ] Memory: carry the durable facts and preferences (workspace `MEMORY.md`/`USER.md`) into a small store that routes can opt into, rather than injecting them into every prompt.
 
@@ -32,9 +32,9 @@ What we will need that isn't built yet, grouped by when it blocks us.
 
 **Quality of life**
 - [ ] Streaming replies and a cancel button in chat (long Opus/Codex calls currently show only a timer).
-- [ ] Concurrency limits: one request at a time per Ollama GPU and a small cap per CLI, so parallel requests queue instead of thrashing.
+- [x] Concurrency limits (`src/limiter.mjs`): 1 in flight for Ollama, 2 per CLI; extra requests queue. Shown on the Schedule tab.
 - [ ] Vision route (`homeai-vision`) with image attachments; the runner is text-only today.
-- [ ] Ledger and history rotation (both files grow without limit; only history is trimmed in memory).
+- [x] Ledger (5 MB) and history (20 MB) rotate to `*.YYYYMMDD.jsonl` without deleting anything (`src/rotate.mjs`); the ledger reloads files rotated in the last 48 h so same-day budgets survive a restart.
 - [ ] Concurrent writes to the same conversation can race (single-user today, so acceptable for now).
 
 ## Rules for all code

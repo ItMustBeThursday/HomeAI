@@ -1,0 +1,10 @@
+{
+  "enabled": true,
+  "jobs": [
+    {
+      "name": "nightly-backup",
+      "dailyAt": "03:00",
+      "command": ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "scripts/backup-data.ps1"]
+    }
+  ]
+}
