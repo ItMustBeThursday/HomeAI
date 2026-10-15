@@ -2,6 +2,10 @@ function Enable-HomeAINativeChatConfig($Config,$Settings,[string]$Primary='Codex
     # Normalize nested PowerShell dictionaries before enumerating JSON fields;
     # repeated calls must not mistake IDictionary's Count/Keys for model ids.
     $Config=($Config | ConvertTo-Json -Depth 50) | ConvertFrom-Json
+    $operatorFullAccess=($Config.tools.PSObject.Properties['exec'] -and $Config.tools.exec.PSObject.Properties['mode'] -and $Config.tools.exec.mode -eq 'full')
+    $originalTools=($Config.tools | ConvertTo-Json -Depth 50) | ConvertFrom-Json
+    $originalApp=$null
+    if($Config.PSObject.Properties['plugins'] -and $Config.plugins.PSObject.Properties['entries'] -and $Config.plugins.entries.PSObject.Properties['codex'] -and $Config.plugins.entries.codex.PSObject.Properties['config'] -and $Config.plugins.entries.codex.config.PSObject.Properties['appServer']){$originalApp=($Config.plugins.entries.codex.config.appServer | ConvertTo-Json -Depth 50) | ConvertFrom-Json}
     $codex='openai/gpt-6-astra'
     $claude='anthropic/claude-opus-5-5'
     $qwen="ollama/$($Settings.mainModel)"
@@ -61,6 +65,11 @@ function Enable-HomeAINativeChatConfig($Config,$Settings,[string]$Primary='Codex
     $Config.plugins | Add-Member -NotePropertyName entries -NotePropertyValue $entries -Force
     if($Config.plugins.PSObject.Properties['allow']) {
         $Config.plugins.allow=@($Config.plugins.allow)+@('codex','anthropic','openai') | Select-Object -Unique
+    }
+    # Preserve an explicit operator full-access choice across connector updates.
+    if($operatorFullAccess) {
+        $Config.tools=$originalTools
+        if($originalApp){$Config.plugins.entries.codex.config.appServer=$originalApp}
     }
     return $Config
 }

@@ -7,7 +7,26 @@ function Get-HomeAIPath([string]$Path) {
     }
     $resolved = [IO.Path]::GetFullPath($Path).TrimEnd('\')
     if ($resolved.Length -le 3) { throw 'A drive root cannot be used as the HomeAI folder.' }
+    if (Test-HomeAIOneDrivePath $resolved) { throw 'HomeAI never uses OneDrive folders. Choose a local folder outside OneDrive.' }
     return $resolved
+}
+
+function Test-HomeAIOneDrivePath([string]$Path) {
+    $full = [IO.Path]::GetFullPath($Path).TrimEnd('\')
+    foreach ($name in @('OneDrive','OneDriveCommercial','OneDriveConsumer')) {
+        $value = [Environment]::GetEnvironmentVariable($name)
+        if ($value) {
+            $base = [IO.Path]::GetFullPath($value).TrimEnd('\')
+            if ($full -eq $base -or $full.StartsWith($base + '\', [StringComparison]::OrdinalIgnoreCase)) { return $true }
+        }
+    }
+    # The folder-name check also covers business libraries whose variables are unset.
+    return @($full.Split('\') | Where-Object { $_ -match '^OneDrive($| - )' }).Count -gt 0
+}
+
+function Get-HomeAIBackupItems {
+    # Top-level HomeAI items captured by Backup-HomeAI.ps1 and restored by Restore-HomeAI.ps1.
+    return @('homeai.json','state','workspace','projects','output','scripts','evaluations')
 }
 
 function Assert-HomeAIChild([string]$Path, [string]$Root) {

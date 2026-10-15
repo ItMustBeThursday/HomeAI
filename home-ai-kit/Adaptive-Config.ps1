@@ -2,7 +2,7 @@ function Set-HomeAIAdaptiveConfig($Config,$Settings) {
     $Config=Set-HomeAIExecutionConfig $Config $Settings
     $Config.plugins.entries | Add-Member -NotePropertyName 'homeai-autonomy' -NotePropertyValue @{enabled=$true;config=@{root=$Settings.root}} -Force
     if($Config.plugins.PSObject.Properties['allow']){$Config.plugins.allow=@($Config.plugins.allow)+@('homeai-autonomy') | Select-Object -Unique}
-    $Config.tools.allow=@($Config.tools.allow)+@('homeai_route','homeai_maintain') | Select-Object -Unique
+    if($Config.tools.PSObject.Properties['allow']){$Config.tools.allow=@($Config.tools.allow)+@('homeai_route','homeai_maintain') | Select-Object -Unique}
     $refs=@('openai/gpt-6-astra','openai/gpt-6.1-sol','anthropic/claude-opus-5-5','anthropic/claude-sonnet-5-5',('ollama/'+$Settings.mainModel),'ollama/homeai-fast:locked','ollama/homeai-vision:locked','ollama/homeai-coder:locked')
     if(-not $Config.agents.defaults.PSObject.Properties['modelPolicy']){$Config.agents.defaults | Add-Member -NotePropertyName modelPolicy -NotePropertyValue ([pscustomobject]@{})}
     $allowed=@();if($Config.agents.defaults.modelPolicy.PSObject.Properties['allow']){$allowed=@($Config.agents.defaults.modelPolicy.allow)}

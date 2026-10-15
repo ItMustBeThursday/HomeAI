@@ -1,5 +1,6 @@
 function Set-HomeAIFleetConfig($Config,$Settings) {
     $Config=($Config | ConvertTo-Json -Depth 50) | ConvertFrom-Json
+    $operatorFullAccess=($Config.tools.PSObject.Properties['profile'] -and $Config.tools.profile -eq 'full' -and -not $Config.tools.PSObject.Properties['allow'])
     $Config.agents | Add-Member -NotePropertyName ownership -NotePropertyValue 'explicit' -Force
     $Config.agents.defaults | Add-Member -NotePropertyName systemAgent -NotePropertyValue @{agentId='main'} -Force
     $Config.agents.defaults | Add-Member -NotePropertyName modelSelectionScope -NotePropertyValue 'session' -Force
@@ -18,6 +19,6 @@ function Set-HomeAIFleetConfig($Config,$Settings) {
     }
     $Config.tools.profile='full'
     $Config.tools | Add-Member -NotePropertyName toolSearch -NotePropertyValue $false -Force
-    $Config.tools.allow=@($Config.tools.allow)+@('homeai_job') | Select-Object -Unique
+    if(-not $operatorFullAccess){$Config.tools.allow=@($Config.tools.allow)+@('homeai_job') | Select-Object -Unique}
     return $Config
 }

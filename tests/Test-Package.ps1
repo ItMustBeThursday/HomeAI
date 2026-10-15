@@ -20,6 +20,9 @@ foreach($scriptFile in Get-ChildItem -LiteralPath $kit -Filter '*.ps1') {
 Assert-Throws { Get-HomeAIPath 'D:\' } 'Drive-root installation refused'
 Assert-Throws { Get-HomeAIPath '.\relative' } 'Relative installation refused'
 Assert-Throws { Get-HomeAIPath '\\server\share\HomeAI' } 'Network installation refused'
+Assert-Throws { Get-HomeAIPath 'C:\Users\example\OneDrive\HomeAI' } 'Personal OneDrive folder refused'
+Assert-Throws { Get-HomeAIPath 'C:\Users\example\OneDrive - Contoso\HomeAI' } 'Business OneDrive folder refused'
+Assert (-not (Test-HomeAIOneDrivePath 'D:\HomeAI\projects\OneDriveSync-notes')) 'Non-OneDrive folder names are not refused'
 Assert-Throws { Assert-HomeAIChild 'D:\elsewhere\file' 'D:\HomeAI' } 'Out-of-scope mutation refused'
 Assert-Throws { Assert-HomeAIChild 'D:\HomeAI\..\escape.txt' 'D:\HomeAI' } 'Traversal refused'
 $previewRoot=Join-Path $PSScriptRoot ('preview-'+[guid]::NewGuid().ToString('N'))

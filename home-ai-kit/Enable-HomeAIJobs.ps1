@@ -46,7 +46,7 @@ try {
     $config.plugins.entries.'homeai-jobs'.enabled=$true
     $config.plugins.entries.'homeai-jobs' | Add-Member -NotePropertyName hooks -NotePropertyValue @{allowConversationAccess=$true;allowPromptInjection=$true} -Force
     if($config.plugins.PSObject.Properties['allow']){$config.plugins.allow=@($config.plugins.allow)+@('homeai-jobs') | Select-Object -Unique}
-    $config.tools.allow=@($config.tools.allow)+@('homeai_job') | Select-Object -Unique
+    if($config.tools.PSObject.Properties['allow']){$config.tools.allow=@($config.tools.allow)+@('homeai_job') | Select-Object -Unique}
     $config.tools.profile='full'
     $config.tools | Add-Member -NotePropertyName toolSearch -NotePropertyValue $false -Force
     $config.agents.entries | Add-Member -NotePropertyName 'homeai-worker' -NotePropertyValue @{

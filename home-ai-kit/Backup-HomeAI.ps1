@@ -43,7 +43,7 @@ function Add-HomeAIBackupEntry([string]$Source,[string]$Relative) {
     }
 }
 
-foreach ($name in @('homeai.json','state','workspace','projects','output','scripts','evaluations')) {
+foreach ($name in (Get-HomeAIBackupItems)) {
     $source = Assert-HomeAIChild (Join-Path $settings.root $name) $settings.root
     if (Test-Path -LiteralPath $source) { Add-HomeAIBackupEntry $source $name }
 }
