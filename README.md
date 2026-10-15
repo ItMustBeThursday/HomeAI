@@ -2,6 +2,10 @@
 
 Windows home AI: local Qwen through Ollama, OpenClaw chat, and optional subscription-backed Codex and Claude Code runtimes.
 
+
+## Model/runtime recovery
+
+For the mixed Codex/Claude harness, API-key and oversized-conversation failures, run `powershell -NoProfile -ExecutionPolicy Bypass -File .\Repair-HomeAIAvailability.ps1` from `D:\HomeAIGit\HomeAI\home-ai-kit` after pulling. The repair verifies a backup, retains app/evolution files and old chats, pauses background work and creates a clean Codex chat. Open the newly printed recovery-chat link. See [RECOVERY.txt](home-ai-kit/RECOVERY.txt). Native main-chat provider switching has been removed from the routing hook; independent job workers still select models adaptively. Hosted-to-local fallback is not a guarantee that a large native transcript will fit a local context window.
 ## Evolution kit: switch/voice policy and switch-lab preview
 
 Source lives in `home-ai-kit/evolution` (deterministic switch scanning, cancellable voice state, model/context admission policy, manifest-driven Node runner and a browser switch lab). Install or upgrade it from the clone:

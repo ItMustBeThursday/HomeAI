@@ -20,7 +20,7 @@ catch(e){if(e.code!=='ENOENT')throw e;
     {id:'vision',ref:'ollama/homeai-vision:locked',kind:'specialist',enabled:false,status:'use-homeai-specialist-vision',priors:{}},
     {id:'embedding',ref:'ollama/homeai-embedding:locked',kind:'embedding',enabled:false,status:'staged-memory-backend-not-enabled',priors:{}}
   ];
-  await atomic(file,{owner:'home-ai-router-v1',enabled:false,autoCoordinator:true,exploration:true,models,quotaBalance:'unknown-unless-native-provider-reports-it',apiBillingConfigured:false,at:new Date().toISOString()});
+  await atomic(file,{owner:'home-ai-router-v1',enabled:false,autoCoordinator:false,exploration:true,models,quotaBalance:'unknown-unless-native-provider-reports-it',apiBillingConfigured:false,at:new Date().toISOString()});
 }
 const guidance=await safe(folder,'guidance.txt');try{await fs.stat(guidance);}catch(e){if(e.code!=='ENOENT')throw e;await fs.writeFile(guidance,'Plan before implementation. Assign task roles so routing can choose models. Prefer local extraction/summaries and existing tools for image inspection. Require real checks for app logic and separate review of design/tests. Report actual model use, fallback, managed changes and remaining limitations. Improve from verified task outcomes and human feedback; do not mistake saved files for quality or run paid loops while idle.',{flag:'wx'});}
 // Validate the installed small model before admitting it as a tool-using worker.

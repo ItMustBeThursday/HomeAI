@@ -1,5 +1,12 @@
 ADAPTIVE HOMEAI ROUTING AND MANAGED IMPROVEMENTS
 
+RECOVERY UPDATE: Automatic main-chat provider switching is disabled. Native
+runtime/transcript ownership cannot safely be migrated by the old model-only
+hook. Role-based adaptive selection still runs for independent job workers.
+See RECOVERY.txt for stuck chats, wrong harnesses and context overflow. The
+older CHAT AND WORKERS description of automatic coordinator switching below
+is superseded by this update; /homeai_auto on now explains this limitation.
+
 From D:\HomeAIGit\HomeAI\home-ai-kit after git pull --ff-only:
   powershell -NoProfile -ExecutionPolicy Bypass -File .\Enable-HomeAINextStage.ps1
 

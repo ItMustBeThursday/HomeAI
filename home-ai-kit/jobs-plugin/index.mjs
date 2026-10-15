@@ -2,24 +2,15 @@ import path from 'node:path';
 import fs from 'node:fs/promises';
 import {spawn} from 'node:child_process';
 import {JobStore,safe} from './store.mjs';
-import {pool,observations,rank,roles,rate,inferRole} from './router.mjs';
+import {pool,observations,rank,roles,rate} from './router.mjs';
 export default {id:'homeai-jobs',name:'HomeAI Jobs',register(api){
   const root=api.pluginConfig?.root;if(typeof root!=='string'||! /^[A-Za-z]:[\\/]/.test(root))throw Error('Configure an absolute Windows HomeAI root.');
   const store=new JobStore(root);let child=null;
   const checkSchema={type:'array',maxItems:10,items:{type:'object',additionalProperties:false,required:['kind','entry'],properties:{kind:{type:'string',enum:['test','syntax']},entry:{type:'string'}}}};
   const roleSchema={type:'string',enum:roles};
-  api.on?.('before_model_resolve',async(event,ctx)=>{
-    if(ctx.agentId!=='main')return;
-    if(/cron|heartbeat|utility|memory/i.test(ctx.trigger||'')||/:cron:|:heartbeat:/.test(ctx.sessionKey||''))return;
-    const data=await pool(root);if(!data?.enabled||!data.autoCoordinator)return;
-    let role=inferRole(event.prompt||'');
-    if(/\b(build|create|develop)\b[\s\S]{0,100}\b(app|application|system|project)\b/i.test(event.prompt||''))role='planning';
-    if(role==='quick'||role==='general')return;
-    // Keep full chat context on hosted coordinators; small locals receive bounded
-    // delegated prompts, not the whole potentially large conversation.
-    const ranked=rank(data.models.filter(m=>m.lane!=='local'),role,await observations(root));const chosen=ranked[0];if(!chosen)return;
-    const slash=chosen.ref.indexOf('/');return {providerOverride:chosen.ref.slice(0,slash),modelOverride:chosen.ref.slice(slash+1)};
-  });
+  // Never change the main session's provider from before_model_resolve.
+  // Native sessions retain runtime/transcript ownership independently of the
+  // model label. Adaptive selection belongs to separate job worker sessions.
   api.registerTool({name:'homeai_route',label:'HomeAI model routing',description:'Inspect the managed model pool or explain ranked choices for a task role. Uses recorded latency, observed token counts, check evidence and human ratings. Unknown quota/usage remains unknown. Does not launch inference, self-score quality or change runtime permissions.',parameters:{type:'object',additionalProperties:false,required:['action'],properties:{action:{type:'string',enum:['pool','explain']},role:roleSchema,lane:{type:'string',enum:['codex','claude','local']},importance:{type:'string',enum:['normal','high']}}},execute:async(_id,p)=>{
     const data=await pool(root);if(!data)throw Error('Enable-HomeAIAdaptive.ps1 must initialize the router first.');
     const value=p.action==='pool'?data:rank(data.models,p.role||'general',await observations(root),{lane:p.lane,importance:p.importance});
