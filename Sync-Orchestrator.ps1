@@ -31,6 +31,7 @@ if ($LASTEXITCODE -ge 8) { throw "robocopy failed ($LASTEXITCODE)" }
 # git writes warnings (e.g. line endings) to stderr; rely on exit codes instead of PowerShell errors.
 $ErrorActionPreference = 'Continue'
 git -C $repo add -- orchestrator
+if ($LASTEXITCODE) { throw 'git add failed (check that D:\HomeAIGit\HomeAI\.git is writable)' }
 git -C $repo diff --cached --quiet -- orchestrator
 if ($LASTEXITCODE -eq 0) { 'No orchestrator changes.'; return }
 git -C $repo commit -m $Message -- orchestrator
