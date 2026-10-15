@@ -19,6 +19,9 @@ export async function snapshot(root,project,run){
       const rel=path.join(relative,item.name);const source=await safe(base,rel);
       if(item.isSymbolicLink())throw Error('Linked project input refused.');
       if(item.name.startsWith('.')||/^(node_modules|auth\.json|credentials.*)$/i.test(item.name))continue;
+      // Offline checks snapshot source, never conventional generated build trees.
+      // Keep this after safe()/link checks: even excluded directory links are refused.
+      if(item.isDirectory()&&/^(build|dist)$/i.test(item.name))continue;
       if(reserved.test(item.name)||!/^[-a-zA-Z0-9_.]+$/.test(item.name)||item.name.endsWith('.'))throw Error('Unsafe snapshot filename.');
       if(item.isDirectory()){await walk(rel,depth+1);continue;}
       if(!/\.(js|mjs|cjs|json|html|css|md|txt|svg)$/i.test(item.name))continue;
