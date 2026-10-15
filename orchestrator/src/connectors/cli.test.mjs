@@ -1,0 +1,69 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import {
+  buildClaudeArgs, parseClaudeJson, buildCodexArgs, parseCodexJsonl, buildOllamaRequest, parseOllamaResponse, OLLAMA_URL,
+} from './cli.mjs';
+
+test('buildClaudeArgs with no tools passes an empty --tools value', () => {
+  const args = buildClaudeArgs({ prompt: 'hi "there"', model: 'sonnet', systemPrompt: 'be brief' });
+  assert.deepEqual(args, [
+    '-p', 'hi "there"', '--output-format', 'json', '--model', 'sonnet', '--system-prompt', 'be brief',
+    '--tools', '', '--strict-mcp-config', '--no-session-persistence', '--max-turns', '1',
+  ]);
+});
+
+test('buildClaudeArgs joins tools and sets turns; omits system prompt when absent', () => {
+  const args = buildClaudeArgs({ prompt: 'p', model: 'opus', tools: ['Read', 'Grep'], maxTurns: 3 });
+  assert.equal(args[args.indexOf('--tools') + 1], 'Read,Grep');
+  assert.equal(args.at(-1), '3');
+  assert.ok(!args.includes('--system-prompt'));
+  assert.throws(() => buildClaudeArgs({ model: 'x' }), /prompt/);
+  assert.throws(() => buildClaudeArgs({ prompt: 'p', model: 'x', maxTurns: 0 }), /maxTurns/);
+});
+
+test('parseClaudeJson extracts text, usage and cost', () => {
+  const out = JSON.stringify({ result: 'done', usage: { input_tokens: 12, output_tokens: 3 }, total_cost_usd: 0.01, is_error: false });
+  assert.deepEqual(parseClaudeJson(out), { text: 'done', inputTokens: 12, outputTokens: 3, costUsd: 0.01, ok: true });
+  assert.deepEqual(parseClaudeJson('{"result":"x","is_error":true}'), { text: 'x', inputTokens: 0, outputTokens: 0, costUsd: null, ok: false });
+  assert.throws(() => parseClaudeJson('not json'), /JSON/);
+});
+
+test('buildCodexArgs', () => {
+  assert.deepEqual(buildCodexArgs({ prompt: 'p', model: 'gpt-5' }), ['exec', '--json', '--ephemeral', '--skip-git-repo-check', '-m', 'gpt-5', '-s', 'read-only', 'p']);
+  assert.throws(() => buildCodexArgs({ prompt: 'p', model: 'm', sandbox: 'danger-full-access' }), /sandbox/);
+});
+
+test('parseCodexJsonl takes last agent message and last usage, skipping junk', () => {
+  const out = [
+    '{"type":"thread.started","thread_id":"t"}',
+    'warning: not json',
+    '{"type":"item.completed","item":{"type":"agent_message","text":"first"}}',
+    '{"type":"turn.completed","usage":{"input_tokens":5,"output_tokens":1}}',
+    '{"type":"item.completed","item":{"type":"agent_message","text":"final"}}',
+    '{"type":"turn.completed","usage":{"input_tokens":40,"output_tokens":9}}',
+    '',
+  ].join('\n');
+  assert.deepEqual(parseCodexJsonl(out), { text: 'final', inputTokens: 40, outputTokens: 9, costUsd: null, ok: true });
+});
+
+test('parseCodexJsonl handles older msg events and failures', () => {
+  const old = '{"msg":{"type":"agent_message","message":"hi"}}\r\n{"msg":{"type":"token_count","usage":{"input_tokens":2,"output_tokens":1}}}';
+  assert.deepEqual(parseCodexJsonl(old), { text: 'hi', inputTokens: 2, outputTokens: 1, costUsd: null, ok: true });
+  assert.equal(parseCodexJsonl('{"type":"error","message":"quota"}').ok, false);
+  assert.equal(parseCodexJsonl('').ok, false);
+});
+
+test('buildOllamaRequest', () => {
+  assert.deepEqual(buildOllamaRequest({ model: 'homeai-fast:locked', prompt: 'p', system: 's' }), {
+    url: OLLAMA_URL,
+    body: { model: 'homeai-fast:locked', stream: false, messages: [{ role: 'system', content: 's' }, { role: 'user', content: 'p' }] },
+  });
+  assert.equal(buildOllamaRequest({ model: 'm', prompt: 'p' }).body.messages.length, 1);
+  assert.equal(OLLAMA_URL, 'http://127.0.0.1:11435/api/chat');
+});
+
+test('parseOllamaResponse', () => {
+  assert.deepEqual(parseOllamaResponse({ message: { content: 'ok' }, prompt_eval_count: 7, eval_count: 2 }), { text: 'ok', inputTokens: 7, outputTokens: 2, costUsd: 0, ok: true });
+  assert.equal(parseOllamaResponse({ message: { content: '' } }).inputTokens, 0);
+  assert.throws(() => parseOllamaResponse({}), /content/);
+});
