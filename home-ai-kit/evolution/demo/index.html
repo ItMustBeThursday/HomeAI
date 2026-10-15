@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>HomeAI — switch lab</title>
+<style>
+:root{color-scheme:dark;font:18px system-ui;background:#101827;color:#f5f8ff}body{max-width:64rem;margin:auto;padding:2rem}h1{font-size:clamp(2rem,5vw,3.5rem)}p{max-width:60ch;line-height:1.6}.tag{color:#91e6cb;text-transform:uppercase;letter-spacing:.15em;font-size:.8rem}.panel{background:#19263b;border:1px solid #6380a9;border-radius:1rem;padding:1.5rem;margin:1.5rem 0}button,input,select{font:inherit;padding:.8rem;margin:.35rem;border-radius:.5rem;border:2px solid #a0b9dd;color:#fff;background:#263d5c}button:focus-visible,input:focus-visible,select:focus-visible{outline:4px solid #ffdf74;outline-offset:4px}button:hover{background:#36527c}.choices{display:flex;gap:1rem;flex-wrap:wrap}.choice{padding:1.5rem;border:3px solid #8093b0;border-radius:.75rem}.choice.active{border-color:#ffdf74;background:#3d3420}label{display:inline-block}#status{font-weight:700;min-height:2rem}small{color:#c5d5ea}
+</style>
+<header><div class="tag">HomeAI development workbench</div><h1>Switch lab</h1><p>A deterministic input simulator for testing one- and two-switch interaction. No Home Assistant devices or Raspberry Pis are connected.</p></header>
+<main><section class="panel" aria-labelledby="setup"><h2 id="setup">Caregiver / developer setup</h2>
+<label>Mode <select id="mode"><option value="one">One switch: scan and select</option><option value="two">Two switches: next and select</option></select></label>
+<label>Scan interval (milliseconds) <input id="interval" type="number" min="500" max="10000" step="100" value="2000"></label>
+<label>Acceptance delay after announcement (milliseconds) <input id="grace" type="number" min="0" max="3000" step="50" value="250"></label>
+<label><input id="audio" type="checkbox" checked>Speak choices with an available local browser voice</label>
+<div><button id="start">Start / reset</button><button id="pause" disabled>Pause</button><button id="resume" disabled>Resume</button><button id="disconnect" disabled>Simulate disconnect</button><button id="reconnect" disabled>Reconnect</button></div>
+<small>Start focuses the keyboard practice area. One switch: hold Space to test that it selects only once. Two switches: Space means next, Enter selects. Each switch button also supports its own keyboard activation. This preview has not been validated for a child's physical access needs.</small></section>
+<section class="panel" aria-labelledby="choicesTitle"><h2 id="choicesTitle">Practice choices</h2><div id="keyboard" tabindex="0" role="group" aria-label="Switch keyboard practice. Space is switch 1. Enter is switch 2.">Keyboard practice area: focus here to use Space and Enter.</div><div class="choices" id="choices"></div><p id="status" role="status" aria-live="polite">Not started.</p><button id="button1" disabled>Switch 1</button><button id="button2" disabled>Switch 2</button></section>
+<section class="panel"><h2>What this demonstrates</h2><p>Switch events are handled by deterministic code. A model does not decide which item a press selects. Disconnect pauses scanning; caregiver resume is explicit. Spoken feedback uses local voices only when the browser reports one available.</p><p>Speech capture, Home Assistant commands, deployment to Pis and supervised hardware trials remain separate integration steps.</p></section></main>
+<script type="module" src="app.mjs"></script></html>

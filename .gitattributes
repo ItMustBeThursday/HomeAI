@@ -1,0 +1,2 @@
+# Keep evolution kit bytes identical to the hash-verified install receipt.
+home-ai-kit/evolution/** -text

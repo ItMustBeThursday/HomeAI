@@ -2,6 +2,20 @@
 
 Windows home AI: local Qwen through Ollama, OpenClaw chat, and optional subscription-backed Codex and Claude Code runtimes.
 
+## Evolution kit: switch/voice policy and switch-lab preview
+
+Source lives in `home-ai-kit/evolution` (deterministic switch scanning, cancellable voice state, model/context admission policy, manifest-driven Node runner and a browser switch lab). Install or upgrade it from the clone:
+
+```powershell
+cd D:\HomeAIGit\HomeAI
+git pull --ff-only
+cd home-ai-kit
+powershell -NoProfile -ExecutionPolicy Bypass -File .\Enable-HomeAIEvolution.ps1 -PlanOnly
+powershell -NoProfile -ExecutionPolicy Bypass -File .\Enable-HomeAIEvolution.ps1 -Serve
+```
+
+It installs additively to `D:\HomeAI\extensions\evolution` with hash-verified payload, backup and receipt, then runs the kit's offline tests. An upgrade moves the previous install to `D:\HomeAI\state\evolution-backups\installed-<stamp>` and moves it back if staging or tests fail. Stop a running preview before upgrading. `-Serve` starts the preview at `http://127.0.0.1:18764/` (use 127.0.0.1, not localhost); it does not autostart after reboot. No OpenClaw configuration, plugins, access settings or devices are changed. Pi/physical switches, Home Assistant, real audio and caregiver/accessibility trials are not connected or certified. See `home-ai-kit/evolution/CURRENT-RUNBOOK.md`.
+
 ## Latest stage: adaptive roles and restorable improvements
 
 From the gaming-PC clone, after the orchestrator is working:

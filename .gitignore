@@ -3,6 +3,7 @@
 /output/
 /tests/artifacts/
 /tests/preview-*/
+/home-ai-kit/evolution/dist/
 *.pdf
 *.docx
 *.zip
