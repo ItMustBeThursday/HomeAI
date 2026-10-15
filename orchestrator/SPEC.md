@@ -1,4 +1,4 @@
-# HomeAI Orchestrator — Phase 1 spec
+# HomeAI Orchestrator — spec
 
 Single local service that routes tasks to LLM connectors (claude-cli, codex-cli, ollama), tracks usage, enforces budgets. Later phases: Logan catalog, device API, MCP server, WebUI.
 
@@ -11,6 +11,31 @@ Single local service that routes tasks to LLM connectors (claude-cli, codex-cli,
 6. **Companion apps**: after everything above is working, update the existing HomeAI companion apps (`D:\HomeAI\projects\homeai-companion`: desktop, android, remote) to use the orchestrator API instead of OpenClaw.
 
 OpenClaw stays the working system until the orchestrator is verified and Adam signs off on cutover.
+
+Status (2026-10-15): Phases 1, 2 and 5 (WebUI v1) done. Phase 3 next.
+
+## Still to do (coverage review 2026-10-15)
+What we will need that isn't built yet, grouped by when it blocks us.
+
+**Blocks OpenClaw cutover**
+- [ ] Standalone Codex install. The service still uses the codex.js inside OpenClaw's folder, so removing OpenClaw would break the `codex` connector.
+- [ ] Codex verified live through the orchestrator (OpenAI quota returns 15:19 ET 2026-10-15).
+- [ ] Auto-start at logon (Windows Scheduled Task running `scripts/start.ps1`). This is a system change, so it needs Adam's approval.
+- [ ] Scheduled jobs (simple timers in-service) to replace OpenClaw automations, starting with a nightly `backup-data.ps1` and later the weekly Logan curation.
+- [ ] Migration checklist: list everything OpenClaw does today that Adam relies on (automations, memory files, channels, Tailscale Funnel exposure, HomeAI jobs), with the replacement for each.
+- [ ] Memory: carry the durable facts and preferences (workspace `MEMORY.md`/`USER.md`) into a small store that routes can opt into, rather than injecting them into every prompt.
+
+**Blocks Logan devices and companion apps**
+- [ ] Phase 3 Logan catalog, rules checker, versioning/rollback, device feed, choice log. Needs from Adam: TV brand(s), what the runner hardware is, and the subscribed services list.
+- [ ] Network access beyond this PC. Today the service is loopback-only. Needed: an opt-in LAN/Tailscale bind, a token that is mandatory when not on loopback, per-device tokens with limited scope (a Logan device can read its menu and post choices, nothing else), and HTTPS via Tailscale.
+- [ ] Phase 4 MCP server so Claude can use the orchestrator directly.
+
+**Quality of life**
+- [ ] Streaming replies and a cancel button in chat (long Opus/Codex calls currently show only a timer).
+- [ ] Concurrency limits: one request at a time per Ollama GPU and a small cap per CLI, so parallel requests queue instead of thrashing.
+- [ ] Vision route (`homeai-vision`) with image attachments; the runner is text-only today.
+- [ ] Ledger and history rotation (both files grow without limit; only history is trimmed in memory).
+- [ ] Concurrent writes to the same conversation can race (single-user today, so acceptable for now).
 
 ## Rules for all code
 - Node.js 24, ES modules (`.mjs`), **no npm dependencies**. Only `node:` built-ins.

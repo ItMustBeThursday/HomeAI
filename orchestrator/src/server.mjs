@@ -44,27 +44,84 @@ function tokenOk(req, token) {
   return got.length === want.length && timingSafeEqual(got, want);
 }
 
-export function createApp({ orchestrator, token, webDir, version = '0.0.0', now = Date.now }) {
+// Input/validation errors from the orchestrator become 400s; "not found" becomes 404.
+async function userCall(fn) {
+  try {
+    return await fn();
+  } catch (err) {
+    if (err instanceof HttpError) throw err;
+    throw new HttpError(/not found/i.test(err.message) ? 404 : 400, err.message);
+  }
+}
+
+// saveConfig(kind, obj) persists an edit ('routes' | 'budgets'); status(config, opts) checks connector health.
+export function createApp({ orchestrator, conversations, saveConfig, status, token, webDir, version = '0.0.0', now = Date.now }) {
   const api = {
     'GET /api/health': () => ({ ok: true, version }),
     'GET /api/config': () => {
       const { connectors, routes, default: def } = orchestrator.config;
-      return { connectors, routes, default: def, caps: orchestrator.caps };
+      return { connectors, routes, default: def, caps: orchestrator.caps, editable: !!saveConfig };
+    },
+    'PUT /api/config/routes': async (req) => {
+      if (!saveConfig) throw new HttpError(404, 'Config editing is not enabled');
+      const body = await readJson(req);
+      await userCall(() => orchestrator.setConfig(body));
+      saveConfig('routes', body);
+      return { ok: true };
+    },
+    'PUT /api/config/budgets': async (req) => {
+      if (!saveConfig) throw new HttpError(404, 'Config editing is not enabled');
+      const body = await readJson(req);
+      await userCall(() => orchestrator.setCaps(body));
+      saveConfig('budgets', body);
+      return { ok: true };
     },
     'GET /api/usage': (req, url) => {
       const hours = Number(url.searchParams.get('hours') ?? 24);
       if (!Number.isFinite(hours) || hours <= 0) throw new HttpError(400, 'hours must be a positive number');
-      return { hours, ...orchestrator.usage(now() - hours * 3_600_000) };
+      return { hours, ...orchestrator.usage(now() - hours * 3_600_000), caps: orchestrator.capStatus() };
+    },
+    'GET /api/status': async (req, url) => {
+      if (!status) throw new HttpError(404, 'Status checks are not enabled');
+      return status(orchestrator.config, { fresh: url.searchParams.get('fresh') === '1' });
+    },
+    'GET /api/history': (req, url) => {
+      const limit = Number(url.searchParams.get('limit') ?? 50);
+      if (!Number.isInteger(limit) || limit < 1 || limit > 1000) throw new HttpError(400, 'limit must be 1-1000');
+      return { tasks: orchestrator.history?.list(limit) ?? [] };
     },
     'POST /api/task': async (req) => {
       const body = await readJson(req);
-      try {
-        return await orchestrator.task({ taskType: body.taskType, prompt: body.prompt, system: body.system });
-      } catch (err) {
-        throw new HttpError(400, err.message);
-      }
+      return userCall(() => orchestrator.task({ taskType: body.taskType, prompt: body.prompt, system: body.system, connector: body.connector }));
+    },
+    'POST /api/chat': async (req) => {
+      const body = await readJson(req);
+      return userCall(() => orchestrator.chat({ conversationId: body.conversationId, prompt: body.prompt, taskType: body.taskType, connector: body.connector }));
+    },
+    'GET /api/conversations': () => {
+      if (!conversations) throw new HttpError(404, 'Chat is not enabled');
+      return { conversations: conversations.list() };
     },
   };
+
+  // Routes with an :id segment.
+  const idApi = {
+    'GET /api/conversations/:id': (id) => userCall(() => conversations.get(id) ?? Promise.reject(new Error('Conversation not found'))),
+    'PATCH /api/conversations/:id': async (id, req) => {
+      const body = await readJson(req);
+      if (typeof body.title !== 'string' || !body.title.trim()) throw new HttpError(400, 'title must be a non-empty string');
+      return userCall(() => conversations.rename(id, body.title.trim()));
+    },
+    'DELETE /api/conversations/:id': (id) => userCall(() => (conversations.archive(id), { ok: true, archived: id })),
+  };
+
+  function findHandler(method, pathname) {
+    const direct = api[`${method} ${pathname}`];
+    if (direct) return direct;
+    const m = /^\/api\/conversations\/([^/]+)$/.exec(pathname);
+    const h = m && conversations && idApi[`${method} /api/conversations/:id`];
+    return h ? (req) => h(decodeURIComponent(m[1]), req) : null;
+  }
 
   async function serveStatic(res, pathname) {
     if (!webDir) throw new HttpError(404, 'Not found');
@@ -87,7 +144,7 @@ export function createApp({ orchestrator, token, webDir, version = '0.0.0', now 
       if (!LOOPBACK_HOSTS.test(req.headers.host ?? '')) throw new HttpError(421, 'Unexpected Host header');
       const url = new URL(req.url, 'http://127.0.0.1');
       if (url.pathname.startsWith('/api/')) {
-        const handler = api[`${req.method} ${url.pathname}`];
+        const handler = findHandler(req.method, url.pathname);
         if (!handler) throw new HttpError(404, 'Unknown endpoint');
         if (url.pathname !== '/api/health' && !tokenOk(req, token)) throw new HttpError(401, 'Missing or wrong bearer token');
         return send(res, 200, await handler(req, url));

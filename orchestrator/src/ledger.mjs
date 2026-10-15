@@ -49,6 +49,54 @@ function over(cap, usage, label) {
   return null;
 }
 
+const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+
+function validateCap(cap, label) {
+  if (!isObj(cap)) throw new Error(`${label} must be an object`);
+  for (const [k, v] of Object.entries(cap)) {
+    if (k !== 'tokens' && k !== 'calls') throw new Error(`${label} has unknown key "${k}" (use tokens or calls)`);
+    if (!Number.isInteger(v) || v < 0) throw new Error(`${label}.${k} must be a non-negative integer`);
+  }
+}
+
+// known: { connectors: string[], taskTypes: string[] } catches typos in cap names.
+export function validateCaps(caps, known = {}) {
+  if (!isObj(caps)) throw new Error('Budget caps must be an object');
+  for (const k of Object.keys(caps)) if (k !== 'daily') throw new Error(`Unknown budget key "${k}" (only "daily")`);
+  const daily = caps.daily;
+  if (daily === undefined) return caps;
+  if (!isObj(daily)) throw new Error('daily must be an object');
+  for (const k of Object.keys(daily)) {
+    if (!['perConnector', 'perTaskType', 'globalTokens'].includes(k)) throw new Error(`Unknown daily key "${k}"`);
+  }
+  if (daily.globalTokens !== undefined && !(Number.isInteger(daily.globalTokens) && daily.globalTokens >= 0)) throw new Error('daily.globalTokens must be a non-negative integer');
+  for (const [group, names] of [['perConnector', known.connectors], ['perTaskType', known.taskTypes]]) {
+    if (daily[group] === undefined) continue;
+    if (!isObj(daily[group])) throw new Error(`daily.${group} must be an object`);
+    for (const [name, cap] of Object.entries(daily[group])) {
+      if (names && !names.includes(name)) throw new Error(`daily.${group} names unknown "${name}"`);
+      validateCap(cap, `daily.${group}.${name}`);
+    }
+  }
+  return caps;
+}
+
+// Every configured cap with its current 24h usage, for dashboards.
+export function capStatus(entries, caps, nowMs) {
+  const daily = caps?.daily;
+  if (!daily) return [];
+  const { total, byConnector, byTaskType } = summarize(entries, nowMs - DAY_MS);
+  const rows = [];
+  const push = (scope, name, cap, usage) => {
+    if (cap.tokens !== undefined) rows.push({ scope, name, metric: 'tokens', used: usage.inputTokens + usage.outputTokens, limit: cap.tokens });
+    if (cap.calls !== undefined) rows.push({ scope, name, metric: 'calls', used: usage.calls, limit: cap.calls });
+  };
+  if (daily.globalTokens !== undefined) push('global', 'all', { tokens: daily.globalTokens }, total);
+  for (const [n, cap] of Object.entries(daily.perConnector ?? {})) push('connector', n, cap, byConnector[n] ?? emptyTotals());
+  for (const [n, cap] of Object.entries(daily.perTaskType ?? {})) push('taskType', n, cap, byTaskType[n] ?? emptyTotals());
+  return rows;
+}
+
 // "Reached" means the next call is refused: usage already at or above the cap.
 export function checkBudget(entries, caps, connector, taskType, nowMs) {
   if (!Number.isFinite(nowMs)) throw new Error('nowMs must be a finite number');

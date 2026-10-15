@@ -15,23 +15,38 @@ A lean local replacement for OpenClaw. It routes each task to the right model (l
   - The usage log on disk recorded every attempt.
 
   Codex hasn't been run live yet.
-- Next: Phase 3 (Logan) or Phase 5 (WebUI).
+- **Phase 5 WebUI v1: done (2026-10-15).** Open http://127.0.0.1:18850. Tabs: Chat (saved multi-turn conversations, route picker, pin a model, shows who answered, time, tokens and fallbacks), Usage (totals, budget meters, by model/route), History (every task with prompt, answer and attempts), Status (Claude/Codex/Ollama health, installed/loaded models), Config (edit routes and budgets with validation, live reload, automatic backups), Logan (placeholder for Phase 3). 58 offline tests pass; chat verified live with Claude Haiku, including a follow-up turn.
+- Next: Phase 3 (Logan), then Phase 4 (MCP). See "Still to do" in [SPEC.md](SPEC.md).
 
 ## Running
 ```powershell
-node src/main.mjs        # http://127.0.0.1:18850
+.\scripts\start.ps1              # background, logs in data\service.*.log; http://127.0.0.1:18850
+.\scripts\start.ps1 -Foreground  # or: node src/main.mjs
+.\scripts\backup-data.ps1        # copies data\ and config\ to D:\HomeAI\backups\orchestrator\<timestamp>
 ```
 Environment overrides: `HOMEAI_ORCH_PORT`, `HOMEAI_ORCH_TOKEN` (bearer token required for everything except `/api/health`), `HOMEAI_ORCH_ROUTES`, `HOMEAI_ORCH_BUDGETS`, `HOMEAI_ORCH_DATA`, `HOMEAI_CLAUDE_BIN`, `HOMEAI_CODEX_SCRIPT`, `HOMEAI_OLLAMA_URL`.
 
-Config: `config/routes.json` (connectors and fallback chains per task type) and `config/budgets.json` (daily caps). Usage is logged to `data/ledger.jsonl`, which never goes to GitHub.
+Config: `config/routes.json` (connectors and fallback chains per task type) and `config/budgets.json` (daily caps). Both can be edited in the WebUI; the previous version is kept in `data/config-backups` (newest 50).
+
+Local data (never goes to GitHub; back it up with `scripts/backup-data.ps1`):
+- `data/ledger.jsonl`: one line per model attempt (tokens, cost, ok)
+- `data/tasks.jsonl`: task history (prompt, answer, attempts), newest 1000 kept in memory
+- `data/conversations/*.json`: chats; archived chats move to `data/conversations/archive`
 
 ## API
 | Method | Path | |
 |---|---|---|
 | GET | `/api/health` | `{ok, version}`, no auth |
-| GET | `/api/config` | connectors, routes, default route, caps |
-| GET | `/api/usage?hours=24` | totals by connector and by task type |
-| POST | `/api/task` | `{taskType?, prompt, system?}` → `{ok, text, connector, model, taskType, attempts[]}` |
+| GET | `/api/config` | connectors, routes, default route, caps, `editable` |
+| PUT | `/api/config/routes` | replace routes.json (validated, applied live, backed up) |
+| PUT | `/api/config/budgets` | replace budgets.json (cap names must match connectors/routes) |
+| GET | `/api/usage?hours=24` | totals by connector and by task type, plus `caps[]` with 24h used/limit |
+| GET | `/api/status[?fresh=1]` | backend and per-connector health (cached 30 s) |
+| GET | `/api/history?limit=50` | recent tasks, newest first |
+| POST | `/api/task` | `{taskType?, prompt, system?, connector?}` → `{id, ok, text, connector, model, taskType, attempts[], ms}`; `connector` pins one model |
+| POST | `/api/chat` | `{conversationId?, prompt, taskType?, connector?}` → `{conversation, reply}`; omitting the id starts a new chat |
+| GET | `/api/conversations` | chat list |
+| GET/PATCH/DELETE | `/api/conversations/:id` | read; rename `{title}`; archive (moved, not deleted) |
 
 ## How it behaves
 - Prompts reach the CLIs over stdin, never on the command line.
@@ -42,5 +57,7 @@ Config: `config/routes.json` (connectors and fallback chains per task type) and 
 
 OpenClaw remains the live system until cutover is approved.
 
+- Chat folds earlier turns into each prompt (newest first, about 12,000 characters), because the CLIs run statelessly. Chat uses a one-line system prompt, which keeps a Claude Haiku turn around 600 input tokens.
+
 ## Source of truth
-Development happens in `D:\HomeAI\projects\orchestrator`. `Sync-Orchestrator.ps1` (repo root) copies it into this repo folder, commits and pushes.
+Development happens in `D:\HomeAI\projects\orchestrator`. `Sync-Orchestrator.ps1` (repo root) copies it into this repo folder, commits and pushes. It refuses to publish if `node --test` fails or if anything looks like a credential (API keys, GitHub/Slack/Tailscale tokens, private keys). `data/` is excluded by both the sync script and `.gitignore`.

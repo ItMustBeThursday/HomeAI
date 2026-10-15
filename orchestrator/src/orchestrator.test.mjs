@@ -66,6 +66,54 @@ test('ledger persists across restarts and skips corrupt lines', async () => {
   assert.equal(readFileSync(file, 'utf8').split('\n').filter(Boolean).length, 2);
 });
 
+test('pinned connector runs only that connector', async () => {
+  const used = [];
+  const o = createOrchestrator({ config, run: async (e) => (used.push(e.connector), ok('x')) });
+  const r = await o.task({ taskType: 'quick', prompt: 'p', connector: 'b' });
+  assert.equal(r.connector, 'b');
+  assert.deepEqual(used, ['b']);
+  await assert.rejects(o.task({ prompt: 'p', connector: 'zzz' }), /Unknown connector/);
+});
+
+test('history records each task with id and attempts', async () => {
+  const recs = [];
+  const o = createOrchestrator({ config, history: { append: (r) => recs.push(r), list: () => recs }, newId: () => 'id1', run: async () => ok('x') });
+  const r = await o.task({ prompt: 'p' });
+  assert.equal(r.id, 'id1');
+  assert.equal(recs[0].prompt, 'p');
+  assert.equal(recs[0].attempts.length, 1);
+  assert.equal(o.history.list().length, 1);
+});
+
+test('chat keeps a conversation and folds prior turns into the prompt', async () => {
+  const { createConversationStore } = await import('./history.mjs');
+  const conversations = createConversationStore(mkdtempSync(join(tmpdir(), 'conv-')));
+  const prompts = [];
+  const o = createOrchestrator({ config, conversations, run: async (e, { prompt }) => (prompts.push(prompt), ok(`re ${prompts.length}`)) });
+  const first = await o.chat({ prompt: 'hello there', taskType: 'solo' });
+  assert.equal(first.conversation.title, 'hello there');
+  assert.equal(first.reply.connector, 'b');
+  await o.chat({ conversationId: first.conversation.id, prompt: 'again' });
+  assert.match(prompts[1], /User: hello there\n\nAssistant: re 1/);
+  const conv = conversations.get(first.conversation.id);
+  assert.equal(conv.messages.length, 4);
+  assert.equal(conv.messages[3].connector, 'b');
+  await assert.rejects(o.chat({ conversationId: 'nope-nope-nope', prompt: 'x' }), /not found/);
+});
+
+test('setConfig and setCaps validate before swapping', () => {
+  const o = createOrchestrator({ config, run: async () => ok('x') });
+  assert.throws(() => o.setConfig({ ...config, default: 'missing' }), /default/);
+  assert.equal(o.config, config);
+  const next = { ...config, routes: { ...config.routes, extra: { chain: ['a'] } } };
+  o.setConfig(next);
+  assert.equal(o.config, next);
+  assert.throws(() => o.setCaps({ daily: { perConnector: { nope: { calls: 1 } } } }), /unknown "nope"/);
+  o.setCaps({ daily: { perConnector: { a: { calls: 1 } } } });
+  assert.equal(o.capStatus()[0].limit, 1);
+  assert.throws(() => o.setConfig({ ...config, connectors: { b: config.connectors.b }, routes: { solo: { chain: ['b'] } }, default: 'solo' }), /unknown "a"/);
+});
+
 test('missing ledger file loads empty', () => {
   const dir = mkdtempSync(join(tmpdir(), 'orch-'));
   writeFileSync(join(dir, 'x'), '');

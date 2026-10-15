@@ -1,0 +1,9 @@
+# Runtime state never goes to GitHub (the repo is public).
+data/
+logs/
+state/
+node_modules/
+*.log
+*.sqlite*
+.env*
+auth.json

@@ -1,6 +1,30 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { makeEntry, summarize, checkBudget } from './ledger.mjs';
+import { makeEntry, summarize, checkBudget, validateCaps, capStatus } from './ledger.mjs';
+
+const T0 = 1_800_000_000_000;
+
+test('validateCaps accepts good caps and rejects typos', () => {
+  const known = { connectors: ['claude'], taskTypes: ['coding'] };
+  assert.ok(validateCaps({}, known));
+  assert.ok(validateCaps({ daily: { globalTokens: 10, perConnector: { claude: { tokens: 5, calls: 1 } }, perTaskType: { coding: { calls: 2 } } } }, known));
+  assert.throws(() => validateCaps({ weekly: {} }, known), /Unknown budget key/);
+  assert.throws(() => validateCaps({ daily: { perConnector: { claud: { calls: 1 } } } }, known), /unknown "claud"/);
+  assert.throws(() => validateCaps({ daily: { perConnector: { claude: { call: 1 } } } }, known), /unknown key "call"/);
+  assert.throws(() => validateCaps({ daily: { perConnector: { claude: { calls: -1 } } } }, known), /non-negative/);
+  assert.throws(() => validateCaps({ daily: { globalTokens: 1.5 } }, known), /globalTokens/);
+});
+
+test('capStatus lists every cap with 24h usage', () => {
+  const entries = [makeEntry({ ts: T0 - 1000, connector: 'claude', taskType: 'coding', inputTokens: 100, outputTokens: 50 })];
+  const rows = capStatus(entries, { daily: { globalTokens: 1000, perConnector: { claude: { calls: 3 }, other: { tokens: 9 } } } }, T0);
+  assert.deepEqual(rows, [
+    { scope: 'global', name: 'all', metric: 'tokens', used: 150, limit: 1000 },
+    { scope: 'connector', name: 'claude', metric: 'calls', used: 1, limit: 3 },
+    { scope: 'connector', name: 'other', metric: 'tokens', used: 0, limit: 9 },
+  ]);
+  assert.deepEqual(capStatus(entries, {}, T0), []);
+});
 
 const NOW = 1_800_000_000_000;
 const HOUR = 3_600_000;

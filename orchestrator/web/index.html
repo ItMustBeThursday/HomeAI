@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>HomeAI Orchestrator</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <span class="brand">HomeAI</span>
+    <nav id="tabs">
+      <button data-tab="chat" class="active">Chat</button>
+      <button data-tab="usage">Usage</button>
+      <button data-tab="history">History</button>
+      <button data-tab="status">Status</button>
+      <button data-tab="config">Config</button>
+      <button data-tab="logan">Logan</button>
+    </nav>
+    <span id="health" class="health" title="Service health">…</span>
+  </header>
+
+  <main>
+    <section id="tab-chat" class="tab active">
+      <aside class="convs">
+        <button id="new-chat" class="primary">+ New chat</button>
+        <ul id="conv-list"></ul>
+      </aside>
+      <div class="thread-wrap">
+        <div class="thread-head">
+          <h2 id="conv-title">New chat</h2>
+          <span class="spacer"></span>
+          <button id="rename-chat" class="ghost" hidden>Rename</button>
+          <button id="archive-chat" class="ghost" hidden>Archive</button>
+        </div>
+        <div id="thread" class="thread"><p class="empty">Ask anything. The route decides which model answers; you can pin one below.</p></div>
+        <form id="composer">
+          <textarea id="prompt" rows="3" placeholder="Message… (Ctrl+Enter to send)" required></textarea>
+          <div class="composer-row">
+            <label>Route <select id="route"></select></label>
+            <label>Model <select id="pin"><option value="">Auto (route chain)</option></select></label>
+            <span class="spacer"></span>
+            <span id="busy" class="muted"></span>
+            <button type="submit" class="primary" id="send">Send</button>
+          </div>
+        </form>
+      </div>
+    </section>
+
+    <section id="tab-usage" class="tab">
+      <div class="toolbar">
+        <label>Window <select id="usage-hours"><option value="24">Last 24 hours</option><option value="168">Last 7 days</option><option value="720">Last 30 days</option></select></label>
+        <button id="usage-refresh" class="ghost">Refresh</button>
+      </div>
+      <div id="usage-totals" class="cards"></div>
+      <h3>Daily budgets (rolling 24h)</h3>
+      <div id="usage-caps"></div>
+      <div class="two-col">
+        <div><h3>By model</h3><div id="usage-conn"></div></div>
+        <div><h3>By route</h3><div id="usage-route"></div></div>
+      </div>
+    </section>
+
+    <section id="tab-history" class="tab">
+      <div class="toolbar"><button id="history-refresh" class="ghost">Refresh</button><span class="muted">Newest first. Click a row for the prompt, answer and fallback attempts.</span></div>
+      <div id="history"></div>
+    </section>
+
+    <section id="tab-status" class="tab">
+      <div class="toolbar"><button id="status-refresh" class="ghost">Check now</button><span id="status-time" class="muted"></span></div>
+      <div id="status-backends" class="cards"></div>
+      <div id="status-conn"></div>
+    </section>
+
+    <section id="tab-config" class="tab">
+      <p class="muted">Edits are validated before they take effect, apply immediately without a restart, and the previous file is backed up to <code>data/config-backups</code>.</p>
+      <div id="route-summary"></div>
+      <div class="two-col">
+        <div>
+          <h3>Routes &amp; connectors <small>config/routes.json</small></h3>
+          <textarea id="cfg-routes" class="code" spellcheck="false"></textarea>
+          <div class="row"><button id="save-routes" class="primary">Save routes</button><span id="msg-routes" class="msg"></span></div>
+        </div>
+        <div>
+          <h3>Budgets <small>config/budgets.json</small></h3>
+          <textarea id="cfg-budgets" class="code" spellcheck="false"></textarea>
+          <div class="row"><button id="save-budgets" class="primary">Save budgets</button><span id="msg-budgets" class="msg"></span></div>
+          <p class="muted">Shape: <code>{"daily": {"globalTokens": n, "perConnector": {"name": {"tokens": n, "calls": n}}, "perTaskType": {"route": {…}}}}</code></p>
+        </div>
+      </div>
+    </section>
+
+    <section id="tab-logan" class="tab">
+      <div class="placeholder">
+        <h2>Logan menus</h2>
+        <p>Coming in Phase 3: the approved menu catalog, version history with rollback, the rules check (ratings, subscribed services, nothing paid), the device feed, and Logan's choice log.</p>
+        <p class="muted">Switch presses stay deterministic. Models only help draft menus, which you approve before they go live.</p>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="token-dialog">
+    <form method="dialog" id="token-form">
+      <h3>Access token</h3>
+      <p class="muted">This service requires the token set in <code>HOMEAI_ORCH_TOKEN</code>. It is stored only in this browser.</p>
+      <input id="token-input" type="password" autocomplete="off" required>
+      <div class="row"><span class="spacer"></span><button class="primary">Save</button></div>
+    </form>
+  </dialog>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
