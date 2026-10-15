@@ -2,6 +2,10 @@
 
 Windows home AI: local Qwen through Ollama, OpenClaw chat, and optional subscription-backed Codex and Claude Code runtimes.
 
+## Orchestrator (in progress)
+
+[`orchestrator/`](orchestrator/) is a lean replacement for OpenClaw: explicit model routing, token budgets, Logan backend, MCP access for Claude, a WebUI, and later updated companion apps. See its [README](orchestrator/README.md) and [roadmap](orchestrator/SPEC.md). OpenClaw stays in use until cutover is approved. Publish updates with `.\Sync-Orchestrator.ps1 -Message "..."`.
+
 
 ## Model/runtime recovery
 
