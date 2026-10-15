@@ -71,11 +71,13 @@ function Start-RecoveryServices([switch]$ModelsOnly) {
 Save-RepairReport
 $before=Join-Path $receiptRoot 'openclaw.before.json';$wroteConfig=$false
 try {
+    Write-Host 'Step 1/6: stop owned gateway and Ollama process trees...'
     Stop-RecoveryOwned
     foreach($name in @('gateway-error.log','gateway-out.log','ollama-error.log')){
         $source=Assert-HomeAIChild (Join-Path $settings.root ('logs\'+$name)) $settings.root
         if(Test-Path -LiteralPath $source){Copy-Item -LiteralPath $source -Destination (Join-Path $receiptRoot $name)}
     }
+    Write-Host 'Step 2/6: create and verify the full state/project backup...'
     $snapshot=& (Join-Path $PSScriptRoot 'Backup-HomeAI.ps1') -Root $settings.root
     $report.backup=$snapshot
     Copy-Item -LiteralPath $configPath -Destination $before
@@ -83,8 +85,10 @@ try {
     if((Get-FileHash -LiteralPath $before -Algorithm SHA256).Hash -ne $report.beforeSha256){throw 'Recovery config backup hash differs.'}
     try {$os=Get-CimInstance Win32_OperatingSystem;$report.ram=@{totalGiB=[Math]::Round($os.TotalVisibleMemorySize/1MB,1);freeGiB=[Math]::Round($os.FreePhysicalMemory/1MB,1)}}catch{}
     Set-RecoveryEnvironment
+    Write-Host 'Step 3/6: inspect native plugins (up to 90 seconds each)...'
     $text=& $node (Join-Path $PSScriptRoot 'recovery-cli.mjs') $settings.root plugins $Primary
     if($LASTEXITCODE -eq 0){$report.pluginsBefore=($text -join "`n") | ConvertFrom-Json}
+    Write-Host 'Step 4/6: start model server and apply runtime repair...'
     Start-RecoveryServices -ModelsOnly
     $text=& $node (Join-Path $PSScriptRoot 'recovery-cli.mjs') $settings.root apply $Primary
     if($LASTEXITCODE -ne 0){throw 'Recovery configuration could not be applied.'}
@@ -95,7 +99,9 @@ try {
         Invoke-HomeAINative $node @($claw,'models','auth','login','--provider','openai','--method','oauth')
         $report.credentialsChanged=$true
     }
+    Write-Host 'Step 5/6: start the repaired gateway...'
     Start-RecoveryServices
+    Write-Host 'Step 6/6: create an independent recovery chat...'
     $text=& $node (Join-Path $PSScriptRoot 'recovery-cli.mjs') $settings.root create $Primary
     if($LASTEXITCODE -ne 0){throw 'Could not create the clean recovery chat. If Codex needs sign-in, rerun with -ReconnectCodex.'}
     $report.chat=($text -join "`n") | ConvertFrom-Json

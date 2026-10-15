@@ -3,6 +3,15 @@ HOMEAI MODEL/RUNTIME AND CONTEXT RECOVERY — OPENCLAW 2026.10.3
 Run from D:\HomeAIGit\HomeAI\home-ai-kit after git pull --ff-only:
   powershell -NoProfile -ExecutionPolicy Bypass -File .\Repair-HomeAIAvailability.ps1
 
+If an earlier repair is silently spending CPU in backup, cancel it with Ctrl+C
+and wait for the original PowerShell prompt before pulling and restarting. Leave
+the incomplete snapshot in place. The updated backup uses the pinned Node
+runtime for streaming copy/hash verification and prints file count, GiB, folder
+count and elapsed time every five seconds while it works. It retains the same
+backup scope and five cache exclusions, and never treats an interrupted snapshot
+as verified. The repair also labels all six stages. Large project trees still
+take time; no fixed duration or target-PC performance measurement is claimed.
+
 If a fresh Codex session actually needs sign-in:
   powershell -NoProfile -ExecutionPolicy Bypass -File .\Repair-HomeAIAvailability.ps1 -ReconnectCodex
 
