@@ -177,6 +177,24 @@
         <div id="status-conn"></div>
       </section>
 
+      <!-- JOBS -->
+      <section id="tab-jobs" class="tab page">
+        <p class="muted">Queue work and walk away. Jobs run in the background with no approval step: the agent keeps going when it runs out of turns, retries failures, and resumes after a restart. It only stops for something it cannot safely do alone (deleting with no backup, sending anything out, purchases, publishing). Those show as <b>needs-input</b> with the question.</p>
+        <form id="job-form" class="panel">
+          <textarea id="job-text" rows="4" placeholder="What should be done? Be specific about the outcome." required></textarea>
+          <div class="toolbar mt">
+            <label class="sel">Project <select id="job-project"></select></label>
+            <label class="sel">Route <select id="job-route"></select></label>
+            <label><input type="checkbox" id="job-plan"> Plan first (runs the plan automatically)</label>
+            <label title="Blank-line separated paragraphs become separate jobs"><input type="checkbox" id="job-split" checked> One job per paragraph</label>
+            <span class="spacer"></span>
+            <button class="primary" id="job-add">Add to queue</button>
+          </div>
+        </form>
+        <div id="jobs-state" class="toolbar mt"></div>
+        <div id="jobs-list"></div>
+      </section>
+
       <!-- SCHEDULE -->
       <section id="tab-schedule" class="tab page">
         <p class="muted">Timed jobs run by the service itself. A job runs a <code>command</code> or a model <code>prompt</code> (optionally on the <code>agent</code> route in a <code>project</code>). Jobs live in <code>config/schedule.json</code>; set <code>"enabled": true</code> there to turn the scheduler on. <b>Run now</b> works either way.</p>

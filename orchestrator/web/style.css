@@ -291,3 +291,7 @@ dialog::backdrop { background: rgba(10,14,22,.5); backdrop-filter: blur(2px); }
 .plan-tag { font-size: 12px; font-weight: 600; color: var(--warn); margin-bottom: 6px; }
 .plan-acts { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 6px 0 2px; font-size: 13px; }
 .big { font-size: 1.8rem; letter-spacing: .15em; font-weight: 600; }
+
+.job-row { cursor: pointer; }
+.job-sum { max-width: 360px; overflow: hidden; text-overflow: ellipsis; }
+.job-detail pre.term { max-height: 340px; overflow: auto; white-space: pre-wrap; }

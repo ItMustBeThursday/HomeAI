@@ -19,6 +19,7 @@ import { createGithub } from './github.mjs';
 import { createVault } from './vault.mjs';
 import { createConnections } from './connections.mjs';
 import { rotateIfLarge } from './rotate.mjs';
+import { createJobs, JOB_SYSTEM } from './jobs.mjs';
 import { startServer } from './server.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -113,6 +114,24 @@ const scheduler = createScheduler({
   runPrompt: (job) => orchestrator.task({ taskType: job.taskType, prompt: job.prompt, source: 'schedule', cwd: job.project && shell ? shell.resolveCwd({ project: job.project }) : undefined }),
 });
 scheduler.start();
+// Background jobs: unattended, no approval gate, auto-continue and retry (see jobs.mjs). Persisted in data/jobs.json.
+const jobs = createJobs({
+  file: join(dataDir, 'jobs.json'),
+  concurrency: 2,
+  run: async ({ job, step, prompt, signal, onEvent }) => {
+    const cfg = orchestrator.config;
+    const route = step === 'plan' ? cfg.auto?.plan ?? 'plan' : job.route ?? cfg.auto?.act ?? 'agent';
+    const agent = orchestrator.isAgentRoute(route);
+    let cwd;
+    if (agent) {
+      if (!shell) return { ok: false, error: 'Shell access is not enabled, so this job cannot run commands' };
+      cwd = shell.resolveCwd({ project: job.project });
+    }
+    const r = await orchestrator.task({ taskType: route, prompt, system: JOB_SYSTEM, source: 'job', cwd, signal, onEvent });
+    return { ok: r.ok, text: r.text, error: r.error, connector: r.connector, model: r.model, taskId: r.id, inputTokens: r.attempts?.reduce((s, a) => s + (a.inputTokens ?? 0), 0), outputTokens: r.attempts?.reduce((s, a) => s + (a.outputTokens ?? 0), 0) };
+  },
+});
+jobs.start();
 const writeConfig = createConfigWriter(join(dataDir, 'config-backups'));
 const status = createStatusChecker({ ollamaBase: ollamaUrl ? new URL(ollamaUrl).origin : undefined, claudeBin, codexScript });
 
@@ -128,6 +147,7 @@ const { version } = readJson(join(root, 'package.json'));
 await startServer({
   orchestrator,
   scheduler,
+  jobs,
   conversations,
   attachments,
   memory,

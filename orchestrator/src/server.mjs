@@ -93,7 +93,7 @@ export function isRemote(req) {
 
 // saveConfig(kind, obj) persists an edit ('routes' | 'budgets'); status(config, opts) checks connector health.
 // auth: createAuth(...) from access.mjs (scoped tokens). token: legacy single bearer token (tests). Neither: open.
-export function createApp({ orchestrator, conversations, scheduler, saveConfig, status, auth, token, attachments, memory, shell, github, connections, network = {}, webDir, version = '0.0.0', now = Date.now, tokenFile }) {
+export function createApp({ orchestrator, conversations, scheduler, jobs, saveConfig, status, auth, token, attachments, memory, shell, github, connections, network = {}, webDir, version = '0.0.0', now = Date.now, tokenFile }) {
   const identify = auth
     ? (h) => auth.identify(h)
     : token
@@ -155,7 +155,7 @@ export function createApp({ orchestrator, conversations, scheduler, saveConfig, 
   // ---- read ----
   add('GET', '/api/config', 'read', () => {
     const { connectors, routes: r, default: def, auto } = orchestrator.config;
-    return { connectors, routes: r, default: def, auto, caps: orchestrator.caps, editable: !!saveConfig, features: { shell: !!shell, memory: !!memory, github: !!github, images: !!attachments, devices: !!auth, connections: !!connections, scheduler: !!scheduler } };
+    return { connectors, routes: r, default: def, auto, caps: orchestrator.caps, editable: !!saveConfig, features: { shell: !!shell, memory: !!memory, github: !!github, images: !!attachments, devices: !!auth, connections: !!connections, scheduler: !!scheduler, jobs: !!jobs } };
   });
   add('GET', '/api/usage', 'read', (c) => {
     const hours = Number(c.url.searchParams.get('hours') ?? 24);
@@ -181,6 +181,28 @@ export function createApp({ orchestrator, conversations, scheduler, saveConfig, 
   add('GET', '/api/github', 'read', (c) => userCall(() => need(github, 'GitHub').summary()));
   add('GET', '/api/github/issues', 'read', (c) => userCall(async () => ({ issues: await need(github, 'GitHub').issues(c.url.searchParams.get('state') ?? 'open') })));
   add('GET', '/api/github/runs', 'read', (c) => userCall(async () => ({ runs: await need(github, 'GitHub').runs() })));
+
+  // ---- background jobs: queue work and walk away ----
+  add('GET', '/api/jobs', 'read', () => ({ jobs: need(jobs, 'Jobs').list(), ...jobs.stats() }));
+  add('GET', '/api/jobs/:id', 'read', (c) => userCall(() => need(jobs, 'Jobs').get(c.params.id)));
+  add('POST', '/api/jobs', 'admin', async (c) => {
+    const body = await readJson(c.req);
+    const q = need(jobs, 'Jobs');
+    return userCall(() => {
+      // A job on an agent route needs a project folder; default to the configured default so "just queue it" works.
+      const fill = (s) => ({ ...s, project: s?.project || (shell?.default ?? undefined) });
+      if (Array.isArray(body.jobs)) return { results: q.addMany(body.jobs.map(fill)) };
+      return q.add(fill(body));
+    });
+  });
+  add('POST', '/api/jobs/clear', 'admin', () => need(jobs, 'Jobs').clearFinished());
+  add('POST', '/api/jobs/pause', 'admin', () => (need(jobs, 'Jobs').pause(), jobs.stats()));
+  add('POST', '/api/jobs/resume', 'admin', () => (need(jobs, 'Jobs').resume(), jobs.stats()));
+  add('POST', '/api/jobs/:id/cancel', 'admin', (c) => userCall(() => need(jobs, 'Jobs').cancel(c.params.id)));
+  add('POST', '/api/jobs/:id/retry', 'admin', async (c) => {
+    const body = await readJson(c.req);
+    return userCall(() => need(jobs, 'Jobs').retry(c.params.id, body.guidance));
+  });
 
   // ---- chat ----
   add('POST', '/api/task', 'chat', async (c) => {

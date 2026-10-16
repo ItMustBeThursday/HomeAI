@@ -43,6 +43,7 @@ const ICONS = {
   moon: '<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>',
   panel: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/>',
   menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
+  queue: '<path d="M4 6h16M4 12h16M4 18h10"/><path d="M18 15l3 3-3 3"/>',
 };
 function icon(name) {
   const s = h('span', { class: 'ico' });
@@ -259,6 +260,7 @@ function markdown(src) {
 // ---- Navigation ----
 const TABS = [
   { id: 'chat', label: 'Chat', icon: 'chat', group: 'Workspace' },
+  { id: 'jobs', label: 'Jobs', icon: 'queue', group: 'Workspace', feature: 'jobs', admin: true },
   { id: 'overview', label: 'Overview', icon: 'grid', group: 'Workspace' },
   { id: 'terminal', label: 'Terminal', icon: 'terminal', group: 'Build', feature: 'shell', admin: true },
   { id: 'projects', label: 'Projects', icon: 'folder', group: 'Build', feature: 'shell', admin: true },
@@ -274,7 +276,7 @@ const TABS = [
 ];
 const TITLES = { ...Object.fromEntries(TABS.map((t) => [t.id, t.label])), settings: 'Settings' };
 const SUBS = {
-  chat: 'Route-aware conversations', overview: 'Everything at a glance', terminal: 'PowerShell in a project folder', projects: 'Tests, git and GitHub',
+  chat: 'Route-aware conversations', jobs: 'Queue work and walk away', overview: 'Everything at a glance', terminal: 'PowerShell in a project folder', projects: 'Tests, git and GitHub',
   memory: 'Durable facts the models can see', usage: 'Tokens, calls and budgets', history: 'Every task and its fallbacks', status: 'Backend and model health',
   schedule: 'Timed jobs and the request queue', config: 'Routes, connectors and budgets', connections: 'Logins for GitHub and other services', devices: 'Tokens for phones and displays', logan: 'Menu catalog (coming)', settings: 'Appearance and shortcuts',
 };
@@ -611,6 +613,7 @@ const SLASH = [
   { cmd: '/new', desc: 'Start a new conversation', run: () => openConversation(null) },
   { cmd: '/route', desc: 'Switch route: /route <name>', arg: true, run: (a) => setRoute(a) },
   { cmd: '/plan', desc: 'Plan a change in a project, then approve it: /plan <what to change>', arg: true, run: (a) => { if (!config?.routes.plan) return toast('There is no "plan" route in config/routes.json', 'bad'); setRoute('plan'); if (a) send(a); } },
+  { cmd: '/job', desc: 'Queue a background job and keep chatting: /job <what to do>', arg: true, run: (a) => queueFromChat(a) },
   { cmd: '/model', desc: 'Pin a model: /model <name|auto>', arg: true, run: (a) => setModel(a) },
   { cmd: '/export', desc: 'Download this chat as Markdown', run: () => $('#export-chat').click() },
   { cmd: '/theme', desc: 'Cycle light / dark / system', run: () => cycleTheme() },
@@ -947,6 +950,88 @@ async function loadSchedule() {
     h('tbody', {}, q.length ? q.map(([k, v]) => h('tr', {}, h('td', {}, k), h('td', {}, v.active), h('td', {}, v.queued), h('td', {}, v.limit))) : h('tr', {}, h('td', { colspan: 4, class: 'muted' }, 'No requests yet')))));
 }
 loaders.schedule = loadSchedule;
+
+// ---- Jobs: queue work, it runs to completion unattended ----
+const JOB_PILL = { queued: '', running: 'warn', done: 'ok', failed: 'bad', cancelled: '', 'needs-input': 'warn' };
+let jobsTimer = null;
+const jobsOpen = new Set();
+async function queueFromChat(text) {
+  if (!text) return toast('Usage: /job <what to do>', 'bad');
+  try {
+    const j = await api('/api/jobs', { method: 'POST', body: { prompt: text, project: $('#project')?.value || undefined } });
+    toast(`Queued: ${j.title}. Watch it on the Jobs page.`, 'ok');
+  } catch (e) { toast(e.message, 'bad'); }
+}
+async function submitJobs(e) {
+  e.preventDefault();
+  const text = $('#job-text').value.trim();
+  if (!text) return;
+  const base = { project: $('#job-project').value || undefined, route: $('#job-route').value || undefined, planFirst: $('#job-plan').checked };
+  // One job per blank-line-separated block when "split" is on; otherwise the whole box is one job.
+  const parts = $('#job-split').checked ? text.split(/\n\s*\n/).map((s) => s.trim()).filter(Boolean) : [text];
+  const btn = $('#job-add');
+  btn.disabled = true;
+  try {
+    const r = parts.length === 1 ? await api('/api/jobs', { method: 'POST', body: { ...base, prompt: parts[0] } }) : await api('/api/jobs', { method: 'POST', body: { jobs: parts.map((prompt) => ({ ...base, prompt })) } });
+    const n = parts.length === 1 ? 1 : r.results.filter((x) => x.ok).length;
+    $('#job-text').value = '';
+    toast(`${n} job${n === 1 ? '' : 's'} queued`, 'ok');
+  } catch (err) { toast(err.message, 'bad'); }
+  btn.disabled = false;
+  loadJobs().catch(() => {});
+}
+function jobDetail(j) {
+  const log = (j.log ?? []).map((l) => `${new Date(l.ts).toLocaleTimeString()}  ${l.msg}`).join('\n');
+  return h('div', { class: 'job-detail' },
+    j.question ? h('p', {}, h('b', {}, 'Needs input: '), j.question) : null,
+    j.result?.text ? h('pre', { class: 'term' }, j.result.text) : j.error ? h('pre', { class: 'term' }, j.error) : null,
+    h('details', {}, h('summary', { class: 'muted' }, 'Activity log'), h('pre', { class: 'term' }, log || '(empty)')));
+}
+async function loadJobs() {
+  const s = await api('/api/jobs');
+  const sel = $('#job-project');
+  if (!sel.options.length && projects.length) sel.replaceChildren(...projects.map((p) => h('option', { value: p.name }, p.name)));
+  const route = $('#job-route');
+  if (route.options.length < 2) route.replaceChildren(h('option', { value: '' }, 'default (agent)'), ...Object.keys(config?.routes ?? {}).map((r) => h('option', { value: r }, r)));
+  const post = (path) => async () => { await api(path, { method: 'POST', body: {} }).catch((err) => toast(err.message, 'bad')); loadJobs(); };
+  $('#jobs-state').replaceChildren(
+    h('span', { class: `pill ${s.running ? 'warn' : 'ok'}` }, `${s.running} running · ${s.queued} waiting · up to ${s.concurrency} at once`),
+    h('button', { class: 'ghost sm', onclick: post(s.paused ? '/api/jobs/resume' : '/api/jobs/pause') }, s.paused ? 'Resume queue' : 'Pause queue'),
+    h('button', { class: 'ghost sm', onclick: post('/api/jobs/clear') }, 'Clear finished'));
+  const act = (j, path, body = {}) => async () => { try { await api(`/api/jobs/${j.id}/${path}`, { method: 'POST', body }); } catch (err) { toast(err.message, 'bad'); } loadJobs(); };
+  const rows = [];
+  for (const j of s.jobs) {
+    const open = jobsOpen.has(j.id);
+    const buttons = [];
+    if (j.status === 'queued' || j.status === 'running') buttons.push(h('button', { class: 'ghost sm', onclick: act(j, 'cancel') }, 'Cancel'));
+    if (['failed', 'cancelled', 'needs-input'].includes(j.status)) {
+      const ask = j.status === 'needs-input';
+      buttons.push(h('button', { class: 'ghost sm', onclick: () => {
+        const g = ask ? window.prompt(`${j.question}\n\nYour answer or guidance:`) : '';
+        if (g === null) return;
+        act(j, 'retry', { guidance: g || undefined })();
+      } }, ask ? 'Answer' : 'Retry'));
+    }
+    const state = j.status === 'running' ? (j.activity?.text ?? 'working…') : j.status === 'queued' && j.attempts ? `retrying (attempt ${j.attempts + 1})` : (j.summary ?? j.error ?? '');
+    rows.push(h('tr', { class: 'job-row', onclick: (ev) => { if (ev.target.closest('button')) return; if (open) jobsOpen.delete(j.id); else jobsOpen.add(j.id); loadJobs(); } },
+      h('td', {}, h('strong', {}, j.title), h('div', { class: 'muted' }, [j.project, j.route, j.planFirst ? 'plan first' : null, j.connector].filter(Boolean).join(' · '))),
+      h('td', {}, h('span', { class: `pill ${JOB_PILL[j.status] ?? ''}` }, j.status), j.continues ? h('span', { class: 'muted' }, ` +${j.continues} cont.`) : null),
+      h('td', { class: 'muted job-sum' }, String(state).slice(0, 160)),
+      h('td', {}, when(j.createdAt)),
+      h('td', {}, ...buttons)));
+    if (open) {
+      const full = await api(`/api/jobs/${j.id}`).catch(() => null);
+      if (full) rows.push(h('tr', {}, h('td', { colspan: 5 }, jobDetail(full))));
+    }
+  }
+  $('#jobs-list').replaceChildren(h('table', {}, h('thead', {}, h('tr', {}, ['Job', 'Status', 'Latest', 'Queued', ''].map((t) => h('th', {}, t)))), h('tbody', {}, rows.length ? rows : h('tr', {}, h('td', { colspan: 5, class: 'muted' }, 'Nothing queued. Add a job above.')))));
+  // Keep refreshing while this page is open: fast when something is active.
+  clearTimeout(jobsTimer);
+  if (current === 'jobs') jobsTimer = setTimeout(() => loadJobs().catch(() => {}), s.running || s.queued ? 2500 : 8000);
+}
+loaders.jobs = async () => { await loadProjects(); await loadJobs(); };
+document.addEventListener('submit', (e) => { if (e.target.id === 'job-form') submitJobs(e); });
+
 
 // ---- Config ----
 function routeSummary(cfg) {
