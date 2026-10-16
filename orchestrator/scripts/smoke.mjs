@@ -32,7 +32,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const run = createRunner({
     cwd,
     claudeBin: env.HOMEAI_CLAUDE_BIN ?? 'claude',
-    codexScript: env.HOMEAI_CODEX_SCRIPT ?? 'D:/HomeAI/state/openclaw/npm/projects/openclaw-codex-8902d781d4/node_modules/@openai/codex/bin/codex.js',
+    codexScript: env.HOMEAI_CODEX_SCRIPT ?? 'D:/HomeAI/runtime/codex/node_modules/@openai/codex/bin/codex.js',
     ollamaUrl: env.HOMEAI_OLLAMA_URL,
   });
   process.exitCode = await smoke({ names: process.argv.slice(2).length ? process.argv.slice(2) : ['ollama'], config, run });

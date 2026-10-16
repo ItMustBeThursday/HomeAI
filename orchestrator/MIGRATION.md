@@ -1,7 +1,6 @@
 # Migrating from OpenClaw to the orchestrator
 
-Status as of 2026-10-15: **everything below is checked from the orchestrator side, but OpenClaw has NOT been removed or
-disabled.** Adam signs off on cutover; nothing here changes OpenClaw.
+Status 2026-10-16: **OpenClaw was cut over and removed with Adam's approval.** Gateway stopped, Tailscale serve entry for it removed, files moved to `D:HomeAI	rashopenclaw-20261016`; verified full backup at `E:HomeAI-Backupsopenclaw-final-20261016-134119`. Companion apps still point at the old gateway and need porting. The public Funnel on :8443 (companion bridge) was left in place.
 
 ## What the orchestrator already replaces
 

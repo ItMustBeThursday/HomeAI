@@ -4,13 +4,13 @@ Single local service that routes tasks to LLM connectors (claude-cli, codex-cli,
 
 ## Roadmap
 1. **Core** (this spec): router, usage ledger + budgets, CLI/Ollama connectors.
-2. **Service**: local HTTP API (`127.0.0.1`, own port, separate from OpenClaw) exposing chat/task, routes, usage, budgets.
+2. **Service**: local HTTP API (`127.0.0.1`, own port, ) exposing chat/task, routes, usage, budgets.
 3. **Logan**: approved choice-menu catalog, device API, live menu reprogramming (switch presses stay deterministic).
 4. **MCP server**: lets Claude talk to the orchestrator directly.
 5. **WebUI**: browser UI served by the service — chat with route/model shown per reply, usage and budget dashboard, route/connector editor, Logan menu/catalog editor, job/history view. Static HTML/CSS/JS with no build step, talking only to the Phase 2 API.
 6. **Companion apps**: after everything above is working, update the existing HomeAI companion apps (`D:\HomeAI\projects\homeai-companion`: desktop, android, remote) to use the orchestrator API instead of OpenClaw.
 
-OpenClaw stays the working system until the orchestrator is verified and Adam signs off on cutover.
+OpenClaw was removed on 2026-10-16 with Adam's sign-off; this orchestrator is now the live system.
 
 Status (2026-10-15): Phases 1, 2 and 5 (WebUI v1) done. Phase 3 next.
 
@@ -18,7 +18,7 @@ Status (2026-10-15): Phases 1, 2 and 5 (WebUI v1) done. Phase 3 next.
 What we will need that isn't built yet, grouped by when it blocks us.
 
 **Blocks OpenClaw cutover**
-- [ ] Standalone Codex install. The service still uses the codex.js inside OpenClaw's folder, so removing OpenClaw would break the `codex` connector.
+- [ ] Standalone Codex install. Done: the service uses `D:HomeAIuntimecodex`.
 - [x] Codex verified live through the orchestrator: `POST /api/task` pinned to `codex` returned `OK` using `gpt-6.1-sol` on 2026-10-15 (15,927 input / 5 output tokens). Direct CLI smoke remains blocked in the Codex sandbox by home-directory/profile access; rerun `node scripts/smoke.mjs codex` in Adam's normal session.
 - [x] Auto-start at logon: scheduled task `HomeAI-Orchestrator-Autostart` runs `scripts/autostart.ps1` (pins node and claude paths, since a task does not get the interactive PATH). Registered with Adam's approval 2026-10-15; verified all three backends are detected when started that way.
 - [x] In-service scheduler (`src/scheduler.mjs`, `config/schedule.json`, log `data/schedule.jsonl`, Schedule tab, `GET /api/schedule`, `POST /api/schedule/run`). Nightly `backup-data.ps1` at 03:00 is enabled; a missed run catches up once. Still to add later: the weekly Logan curation job, and an LLM-task job type.

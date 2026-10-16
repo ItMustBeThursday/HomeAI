@@ -47,10 +47,9 @@ const scratch = join(dataDir, 'scratch');
 mkdirSync(scratch, { recursive: true });
 
 const claudeBin = env.HOMEAI_CLAUDE_BIN ?? 'claude';
-// Standalone Codex install (does not depend on OpenClaw); the old OpenClaw-bundled copy is only a fallback.
+// Standalone Codex install.
 const STANDALONE_CODEX = 'D:\\HomeAI\\runtime\\codex\\node_modules\\@openai\\codex\\bin\\codex.js';
-const LEGACY_CODEX = 'D:\\HomeAI\\state\\openclaw\\npm\\projects\\openclaw-codex-8902d781d4\\node_modules\\@openai\\codex\\bin\\codex.js';
-const codexScript = env.HOMEAI_CODEX_SCRIPT ?? (existsSync(STANDALONE_CODEX) ? STANDALONE_CODEX : LEGACY_CODEX);
+const codexScript = env.HOMEAI_CODEX_SCRIPT ?? STANDALONE_CODEX;
 const ollamaUrl = env.HOMEAI_OLLAMA_URL;
 const gitBin = env.HOMEAI_GIT_BIN ?? (existsSync('D:\\HomeAI\\runtime\\git\\cmd\\git.exe') ? 'D:\\HomeAI\\runtime\\git\\cmd\\git.exe' : 'git');
 
