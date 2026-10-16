@@ -1,1 +1,0 @@
-{"id":"homeai-autonomy","name":"HomeAI Managed Improvements","description":"Audited model staging and restorable managed guidance","activation":{"onStartup":true},"contracts":{"tools":["homeai_maintain"]},"configSchema":{"type":"object","additionalProperties":false,"required":["root"],"properties":{"root":{"type":"string","minLength":4}}}}
