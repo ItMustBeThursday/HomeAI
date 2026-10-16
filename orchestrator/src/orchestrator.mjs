@@ -177,6 +177,9 @@ export function createOrchestrator({ config, caps = {}, store, history, conversa
   // auto: the autoRoute decision for this message; the conversation stays an "auto" one and the reply records why.
   async function chat({ conversationId, prompt, taskType, connector, params, runId, images = [], cwd, project, approve = false, auto, signal, onEvent } = {}) {
     if (!conversations) throw new Error('Chat is not enabled');
+    // A repeated request id (client retry after a lost stream) resolves to the chat it already created; nothing re-runs.
+    const prior = runId && conversations.findByRun?.(runId);
+    if (prior) { onEvent?.({ type: 'conversation', id: prior.id }); return { duplicate: true, conversation: { id: prior.id, title: prior.title }, reply: { ok: true, duplicate: true, text: '', run: prior.status } }; }
     let conv;
     let type;
     let modelPrompt;
@@ -215,11 +218,17 @@ export function createOrchestrator({ config, caps = {}, store, history, conversa
         ? `${conv.run?.mediaPrompt ?? conv.messages.findLast(m => m.role === 'user')?.text ?? ''}\n${prompt}` : prompt;
       if (images.length) throw new Error('Attached-image media generation is not configured yet. Describe the scene to generate from text.');
     }
-    const resume = conv.run?.status === 'interrupted' ? `Saved interrupted task (inspect current files before repeating operations):\n${conv.run.prompt}\nRecent observed activity:\n${conv.run.progress.join('\n')}\n` : '';
+    const resume = conv.run?.status === 'interrupted' ? `Saved interrupted task (inspect current files before repeating operations):\n${conv.run.prompt}\nRecent observed activity:\n${conv.run.progress.join('\n')}\n${conv.run.partial ? `Partial reply text before the interruption (unverified, may be incomplete):\n${conv.run.partial.slice(-4000)}\n` : ''}` : '';
     if (resume && !isMedia) modelPrompt = `${resume}\n${modelPrompt}`;
     const refs = images.map(({ id, name, mediaType }) => ({ id, name, mediaType }));
     const userMsg = { role: 'user', text: prompt, ts: now(), ...(refs.length ? { images: refs } : {}), ...(approve ? { approved: true } : {}) };
-    conversations.begin(conv.id, userMsg, { route:type, prompt, runId, ...(isMedia ? {mediaPrompt:modelPrompt} : {}) });
+    try {
+      conversations.begin(conv.id, userMsg, { route:type, prompt, runId, ...(isMedia ? {mediaPrompt:modelPrompt} : {}) });
+    } catch (err) {
+      // A retried transport request with the same id must not run the model a second time.
+      if (err.duplicate) { onEvent?.({ type: 'conversation', id: conv.id }); const cur = conversations.get(conv.id); return { duplicate: true, conversation: { id: cur.id, title: cur.title, project: cur.project }, reply: { ok: true, duplicate: true, text: '', run: cur.run?.status } }; }
+      throw err;
+    }
     // Lets a client that loses its connection find the conversation that will receive the reply.
     onEvent?.({ type: 'conversation', id: conv.id });
     let reply;

@@ -266,6 +266,12 @@ export function createApp({ orchestrator, conversations, scheduler, jobs, grants
     run.abort();
     return { ok: true, cancelled: c.params.id };
   });
+  // Where did a request id end up? Lets a client that lost the stream before the conversation id arrived find its chat.
+  add('GET', '/api/runs/:id', 'chat', (c) => {
+    const found = need(conversations, 'Chat').findByRun(c.params.id);
+    if (!found) throw new HttpError(404, 'No saved request with that id');
+    return { ...found, active: activeRuns.has(c.params.id) };
+  });
   add('POST', '/api/chat', 'chat', async (c) => {
     const body = await readJson(c.req, MAX_BODY_IMAGES);
     const conv = body.conversationId && conversations ? conversations.get(body.conversationId) : null;

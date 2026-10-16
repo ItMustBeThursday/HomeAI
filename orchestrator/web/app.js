@@ -473,7 +473,7 @@ function messageEl(m, index) {
   // Only the newest plan can be approved (mirrors the server: failed approval runs after it don't count).
   const pendingPlan = m.plan && !m.error && index === pendingPlanIndex();
   const wrap = h('div', { class: `m bot${m.error ? ' error' : ''}${m.plan ? ' plan' : ''}` },
-    h('div', { class: 'bubble' }, m.plan ? h('div', { class: 'plan-tag' }, `Plan${m.project ? ` · ${m.project}` : ''} — nothing has been changed yet`) : null, body, m.text && m.error ? markdown(m.text) : null,
+    h('div', { class: 'bubble' }, m.plan ? h('div', { class: 'plan-tag' }, `Plan${m.project ? ` · ${m.project}` : ''} — nothing has been changed yet`) : null, body, m.text && m.error ? markdown(m.text) : null, m.partial && m.error ? h('details', { class:'attempt-details' }, h('summary', {}, 'Saved partial reply (unverified)'), h('pre', {}, m.partial)) : null,
       m.files?.length ? h('div', { class:'inline-media' }, m.files.map(mediaView)) : null,
       m.error && m.attempts?.length ? h('details', { class:'attempt-details' }, h('summary', {}, 'Attempt details'), m.attempts.map(a => h('p', {}, `${a.connector}: ${a.skipped || a.error || 'Completed'}`))) : null),
     ui.showMeta ? botMeta(m) : null,
@@ -583,13 +583,19 @@ async function openConversation(id) {
     if (conv.run?.status === 'running') {
       // Refresh/reopen observes the detached run instead of starting another one.
       const started = conv.run.started;
+      // Reattached Stop: the service still holds this run under its request id.
+      const reRun = conv.run.runId;
+      const stopBtn = $('#stop');
+      if (reRun) { activeRunId = reRun; stopBtn.hidden = false; }
+      const done = () => { if (activeRunId === reRun) activeRunId = null; if (!sending) stopBtn.hidden = true; };
       const poll = async () => {
-        if (convId !== id) return;
+        if (convId !== id) return done();
         const saved = await api(`/api/conversations/${encodeURIComponent(id)}`).catch(() => null);
         // A restart can make several polls fail. Keep observing the same saved run.
         if (!saved) return setTimeout(poll, 3000);
         if (convId !== id) return;
         if (saved.run?.status === 'running' && saved.run.started === started) return setTimeout(poll, 3000);
+        done();
         msgs = saved.messages.map(m => ({...m})); renderThread(); loadConversations();
       };
       setTimeout(poll, 3000);
@@ -960,6 +966,13 @@ async function send(text, { approve = false } = {}) {
     if (dropped) {
       // The service keeps the run going and saves the reply. Wait for it instead of showing an error or re-sending.
       let saved = null;
+      if (!convId) {
+        // The stream broke before the conversation-id event: ask the service where this request id ended up (never re-send).
+        for (let i = 0; i < 10 && !convId; i++) {
+          const f = await api(`/api/runs/${encodeURIComponent(runId)}`).catch(() => null);
+          if (f?.id) { convId = f.id; localStorage.setItem('homeai-last-conversation', convId); } else await sleep(1500);
+        }
+      }
       if (convId) {
         status.textContent = 'Connection to the service dropped. Waiting for the reply to be saved…';
         saved = await awaitSavedReply(convId, sentAt, status).catch(() => null);

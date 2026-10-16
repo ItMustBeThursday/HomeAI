@@ -21,11 +21,11 @@ Never automatically replay tools, purchases, messages, or media generation.
    retry; resolve creation when the response is lost before the conversation-ID event;
    persist partial streamed text with bounded writes; restore cancellation controls on
    reattachment; show running/interrupted state and activity persistently in the UI.
-   Status: pending. Current recovery preserves requests/activity, not every streamed token.
+   Status: implemented in code+tests 2026-10-16 (src/continuity.test.mjs): request-id dedup, GET /api/runs/:id lookup, bounded partial-text persistence (2s flush, 20k cap), reattached Stop, partial shown in UI. Live deployment/browser check pending.
 5. Harden storage and operations. Validate corrupt/truncated-file recovery with a retained
    previous snapshot or journal; assess disk-full behavior and flush guarantees; inspect
    exit logs and startup supervision. Keep backups, avoid automatic action replay.
-   Status: pending. Current conversation writes use temporary-file rename; this alone
+   Status: fsync + .bak snapshot + corrupt fallback (.corrupt kept) implemented and tested; disk-full and power-loss behavior unverified. Earlier note: temp-file rename alone
    does not establish power-loss durability or recover an already-corrupt file.
 6. Acceptance checks. Run the suite; test refresh during a detached request, temporary
    network loss then recovery, actual service restart during a stubbed running request,

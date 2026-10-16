@@ -6,6 +6,8 @@ A lean local replacement for OpenClaw. It routes each task to the right model (l
 - Runtime: Node.js 24, ES modules, no npm dependencies
 - Tests: `node --test` (each `src/**/*.mjs` module has a `*.test.mjs`)
 
+The app version lives in `package.json`; the WebUI status, health API and MCP server all use that value. Version `0.30.0` establishes the current development baseline (not a reconstructed release count). For each release, increase the minor version for new features and the patch version for fixes; restart the service to load the new version.
+
 ## Status
 - **Phase 1 core: done (2026-10-15).** `src/router.mjs`, `src/ledger.mjs` and `src/connectors/cli.mjs` are written, and 19 offline tests pass (`npm test`). `node scripts/smoke.mjs ollama claude` checks the parsers against real output. Ollama and Claude have been verified live; Codex was verified live through `/api/task` on 2026-10-15 (`gpt-6.1-sol`, reply `OK`). The direct Codex smoke check remains blocked in the Codex sandbox by home-directory/profile access.
 - Claude prompt-cache reads/writes count fully as input tokens (decided 2026-10-15).
