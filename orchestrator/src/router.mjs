@@ -24,6 +24,14 @@ export function validateRoutes(config) {
     if (r.maxTurns !== undefined && !(Number.isInteger(r.maxTurns) && r.maxTurns >= 1)) throw new Error(`Route "${type}" maxTurns must be a positive integer`);
     if (r.tools !== undefined && !(Array.isArray(r.tools) && r.tools.every((t) => typeof t === 'string' && t))) throw new Error(`Route "${type}" tools must be an array of strings`);
     if (r.agent !== undefined && typeof r.agent !== 'boolean') throw new Error(`Route "${type}" agent must be a boolean`);
+    // readOnly: an agent that may only look (planning). then: the route that carries out an approved plan.
+    if (r.readOnly !== undefined && typeof r.readOnly !== 'boolean') throw new Error(`Route "${type}" readOnly must be a boolean`);
+    if (r.readOnly && !r.agent) throw new Error(`Route "${type}" readOnly only applies to agent routes`);
+    if (r.then !== undefined) {
+      const next = routes[r.then];
+      if (!r.readOnly) throw new Error(`Route "${type}" then only applies to readOnly (planning) routes`);
+      if (!isObj(next) || !next.agent || next.readOnly) throw new Error(`Route "${type}" then must name an agent route that can make changes`);
+    }
     // memory: true = core notes plus relevant ones; an array limits it to notes with those tags.
     if (r.memory !== undefined && !(typeof r.memory === 'boolean' || (Array.isArray(r.memory) && r.memory.every((t) => typeof t === 'string' && t)))) throw new Error(`Route "${type}" memory must be a boolean or an array of tags`);
   }
@@ -39,6 +47,7 @@ export function resolveChain(config, taskType) {
       connector: name, kind: c.kind, model: c.model, maxTurns: route.maxTurns ?? 1, tools: [...(route.tools ?? [])],
       ...(c.vision ? { vision: true } : {}),
       ...(route.agent ? { agent: true } : {}),
+      ...(route.readOnly ? { readOnly: true } : {}),
     };
   });
 }

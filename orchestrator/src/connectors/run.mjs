@@ -169,6 +169,8 @@ export function createRunner({
     };
     const streaming = !!(onDelta || onEvent || entry.agent);
     const agent = !!entry.agent;
+    // readOnly (planning): may look around the project but not change it.
+    const canWrite = agent && !entry.readOnly;
     if (agent && !workDir) throw new Error('Agent routes need a project (working directory)');
     switch (entry.kind) {
       case 'claude-cli': {
@@ -176,7 +178,7 @@ export function createRunner({
         const args = buildClaudeArgs({
           model: entry.model, systemPrompt: system, tools: entry.tools, maxTurns: entry.maxTurns, stdinPrompt: true,
           stream: streaming, streamInput: withImages,
-          allowedTools: agent ? entry.tools : undefined, permissionMode: agent ? 'acceptEdits' : undefined,
+          allowedTools: agent ? entry.tools : undefined, permissionMode: canWrite ? 'acceptEdits' : undefined,
         });
         const input = withImages
           ? buildClaudeStreamInput({ prompt, images: images.map((i) => ({ mediaType: i.mediaType, data: readFile(i.path).toString('base64') })) })
@@ -203,7 +205,7 @@ export function createRunner({
         const input = system ? `${system}\n\n${prompt}` : prompt;
         const args = [codexScript, ...buildCodexArgs({
           model: entry.model, stdinPrompt: true, images: images.map((i) => i.path),
-          sandbox: agent ? 'workspace-write' : 'read-only', cwd: agent ? workDir : undefined, network: agent,
+          sandbox: canWrite ? 'workspace-write' : 'read-only', cwd: agent ? workDir : undefined, network: canWrite,
         })];
         const onLine = streaming ? (line) => codexEvents(line).forEach(emit) : undefined;
         return viaCli(nodeBin, args, input, parseCodexJsonl, { signal, runCwd: agent ? workDir : undefined, limit: agent ? AGENT_TIMEOUT_MS : undefined, onLine });

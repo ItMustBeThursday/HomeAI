@@ -136,6 +136,22 @@ test('codex agent uses workspace-write in the project; images are passed as path
   assert.equal(calls[0].cwd, 'D:\\proj');
 });
 
+test('read-only (planning) agents run in the project but cannot write: no acceptEdits, codex sandbox read-only', async () => {
+  const calls = [];
+  const claude = createRunner({ claudeBin: 'c', baseEnv: {}, spawnImpl: fakeSpawn({ stdout: result('plan') + '\n' }, calls) });
+  await claude({ kind: 'claude-cli', model: 'sonnet', maxTurns: 5, tools: ['Read', 'Glob'], agent: true, readOnly: true }, { prompt: 'p', cwd: 'D:\\proj' });
+  assert.equal(calls[0].cwd, 'D:\\proj');
+  assert.equal(calls[0].args.includes('--permission-mode'), false);
+  assert.equal(calls[0].args[calls[0].args.indexOf('--tools') + 1], 'Read,Glob');
+  const out = line({ type: 'item.completed', item: { type: 'agent_message', text: 'plan' } });
+  const codex = createRunner({ codexScript: 'codex.js', nodeBin: 'node.exe', baseEnv: {}, spawnImpl: fakeSpawn({ stdout: out }, calls) });
+  await codex({ kind: 'codex-cli', model: 'g', agent: true, readOnly: true }, { prompt: 'p', cwd: 'D:\\proj' });
+  const a = calls[1].args;
+  assert.equal(a[a.indexOf('-s') + 1], 'read-only');
+  assert.equal(a[a.indexOf('-C') + 1], 'D:\\proj');
+  assert.equal(a.some((x) => x.includes('network_access')), false);
+});
+
 test('ollama: streams deltas, sends images to vision models only', async () => {
   const bodies = [];
   const ndjson = ['{"message":{"content":"a"}}', '{"message":{"content":"b"},"done":true,"prompt_eval_count":2,"eval_count":3}'].join('\n') + '\n';

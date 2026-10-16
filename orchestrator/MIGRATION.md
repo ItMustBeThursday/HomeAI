@@ -12,6 +12,7 @@ disabled.** Adam signs off on cutover; nothing here changes OpenClaw.
 | Image input | Attach/paste/drop in WebUI; `images` on the API; `images` in MCP `ask`/`chat` | live check (Claude and local vision read a red test image) |
 | Shell / run programs / tests | Terminal and Projects tabs, `/api/exec`, MCP `shell`, `run_tests` | live check |
 | Coding agent | `agent` route (Claude or Codex inside a registered project) | live check |
+| Plan, then make changes from chat | `plan` route (read-only look + numbered plan), **Approve & run** button / `approve: true` on `/api/chat` runs it on the `agent` route; `/plan` in the composer; `homeai-projects` project = D:\HomeAI\projects | live (plan + approve created a test folder); button not click-tested |
 | GitHub | Projects tab + `/api/github*` (reads, issues, comments), publish via project `sync` command | live check (read) |
 | Automations | `config/schedule.json` + Schedule tab (the 2 old OpenClaw automations were disabled) | tests |
 | Memory notes | Memory tab, `/api/memory`, injected per route (`"memory": true`) | live check |

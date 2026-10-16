@@ -12,6 +12,10 @@
       "test": ["node", "--test"],
       "sync": ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "D:\\HomeAIGit\\HomeAI\\Sync-Orchestrator.ps1", "-Message", "{message}"]
     },
+    "homeai-projects": {
+      "path": "D:\\HomeAI\\projects",
+      "description": "Parent folder of all HomeAI projects (for reorganising across them; the running orchestrator lives inside)"
+    },
     "homeai-repo": {
       "path": "D:\\HomeAIGit\\HomeAI",
       "description": "Checkout of the public GitHub repo ItMustBeThursday/HomeAI"

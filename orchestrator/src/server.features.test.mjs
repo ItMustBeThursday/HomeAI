@@ -19,6 +19,7 @@ const config = {
     quick: { chain: ['a'] },
     vision: { chain: ['a'] },
     agent: { chain: ['c'], agent: true, tools: ['Bash'] },
+    plan: { chain: ['c'], agent: true, readOnly: true, then: 'agent', tools: ['Read'] },
   },
   default: 'quick',
 };
@@ -201,6 +202,25 @@ test('agent routes are admin-only, run in the project folder, and never accept a
   // The conversation remembers it's an agent chat: a chat-scope device can't continue it.
   const cont = await call('POST', '/api/chat', { token: chatToken, body: { conversationId: chat.json.conversation.id, prompt: 'more' } });
   assert.equal(cont.status, 403);
+});
+
+test('plan then approve: approval is admin-only, runs the then route in the planned project, and needs a pending plan', async () => {
+  const plan = await call('POST', '/api/chat', { body: { prompt: 'tidy up', taskType: 'plan', project: 'p' } });
+  assert.equal(plan.status, 200);
+  assert.equal(runs.at(-1).entry.readOnly, true);
+  assert.equal(runs.at(-1).cwd, projectDir);
+  const id = plan.json.conversation.id;
+  assert.equal((await call('POST', '/api/chat', { token: chatToken, body: { conversationId: id, approve: true } })).status, 403);
+  assert.equal((await call('POST', '/api/chat', { body: { conversationId: id, approve: true, images: [{ name: 'a.png', mediaType: 'image/png', data: PNG }] } })).status, 400);
+  const run = await call('POST', '/api/chat', { body: { conversationId: id, approve: true } });
+  assert.equal(run.status, 200);
+  assert.equal(run.json.reply.taskType, 'agent');
+  assert.equal(runs.at(-1).entry.readOnly, undefined);
+  assert.equal(runs.at(-1).cwd, projectDir);
+  assert.match(runs.at(-1).prompt, /Approved plan:\nhello/);
+  const again = await call('POST', '/api/chat', { body: { conversationId: id, approve: true } });
+  assert.equal(again.status, 400);
+  assert.match(again.json.error, /no plan waiting/);
 });
 
 test('exec, test and git are admin-only; exec streams output', { skip: process.platform !== 'win32' }, async () => {

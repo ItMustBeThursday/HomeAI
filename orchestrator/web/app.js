@@ -369,6 +369,7 @@ const SUGGESTIONS = [
   ['Review code', 'Review this code for bugs and suggest fixes:\n\n', 'coder route'],
   ['Check the project', 'Run the tests in the current project and tell me what fails.', 'agent route, needs a project'],
   ['Plan a feature', 'Help me plan the next feature for the orchestrator step by step.', 'general route'],
+  ['Reorganise files', 'Look at how this project folder is laid out and plan a cleaner structure. ', 'plan route: look, propose, then you approve', 'plan'],
 ];
 
 function botMeta(m) {
@@ -401,13 +402,27 @@ function messageEl(m, index) {
   }
   const body = m.error ? h('p', {}, `No answer: ${m.error}`) : markdown(m.text);
   const prior = msgs.slice(0, index).reverse().find((x) => x.role === 'user');
-  const wrap = h('div', { class: `m bot${m.error ? ' error' : ''}` },
-    h('div', { class: 'bubble' }, body, m.text && m.error ? markdown(m.text) : null),
+  // Only the newest plan can be approved (mirrors the server: failed approval runs after it don't count).
+  const pendingPlan = m.plan && !m.error && index === pendingPlanIndex();
+  const wrap = h('div', { class: `m bot${m.error ? ' error' : ''}${m.plan ? ' plan' : ''}` },
+    h('div', { class: 'bubble' }, m.plan ? h('div', { class: 'plan-tag' }, `Plan${m.project ? ` · ${m.project}` : ''} — nothing has been changed yet`) : null, body, m.text && m.error ? markdown(m.text) : null),
     ui.showMeta ? botMeta(m) : null,
+    pendingPlan ? h('div', { class: 'plan-acts' },
+      h('button', { class: 'primary', onclick: () => approvePlan() }, 'Approve & run'),
+      h('span', { class: 'muted' }, 'or reply below to change the plan. Text in the box is sent as extra instructions when you approve.')) : null,
     h('div', { class: 'acts' },
       m.text ? h('button', { class: 'ghost', onclick: () => copyText(m.text) }, 'Copy') : null,
-      prior ? h('button', { class: 'ghost', onclick: () => send(prior.text) }, 'Retry') : null));
+      prior ? h('button', { class: 'ghost', onclick: () => (prior.approved ? approvePlan() : send(prior.text)) }, 'Retry') : null));
   return wrap;
+}
+function pendingPlanIndex() {
+  let i = msgs.length - 1;
+  while (i >= 2 && msgs[i].role === 'assistant' && msgs[i].error && msgs[i - 1].approved) i -= 2;
+  return msgs[i]?.plan ? i : -1;
+}
+function approvePlan() {
+  if (pendingPlanIndex() < 0) return toast('There is no plan waiting for approval', 'bad');
+  send($('#prompt').value, { approve: true });
 }
 
 function atBottom() {
@@ -428,7 +443,7 @@ function renderThread() {
     thread.append(h('div', { class: 'welcome' },
       h('h2', {}, 'What can I help with?'),
       h('p', { class: 'muted' }, 'The route decides which model answers. Pin a model below to override it.'),
-      h('div', { class: 'suggest' }, SUGGESTIONS.map(([t, p, d]) => h('button', { type: 'button', onclick: () => { $('#prompt').value = p; autosize(); $('#prompt').focus(); } }, h('strong', {}, t), h('span', {}, d))))));
+      h('div', { class: 'suggest' }, SUGGESTIONS.map(([t, p, d, r]) => h('button', { type: 'button', onclick: () => { if (r && config?.routes[r]) setRoute(r); $('#prompt').value = p; autosize(); $('#prompt').focus(); } }, h('strong', {}, t), h('span', {}, d))))));
     return;
   }
   msgs.forEach((m, i) => thread.append(messageEl(m, i)));
@@ -578,6 +593,7 @@ const remember = (t) => {
 const SLASH = [
   { cmd: '/new', desc: 'Start a new conversation', run: () => openConversation(null) },
   { cmd: '/route', desc: 'Switch route: /route <name>', arg: true, run: (a) => setRoute(a) },
+  { cmd: '/plan', desc: 'Plan a change in a project, then approve it: /plan <what to change>', arg: true, run: (a) => { if (!config?.routes.plan) return toast('There is no "plan" route in config/routes.json', 'bad'); setRoute('plan'); if (a) send(a); } },
   { cmd: '/model', desc: 'Pin a model: /model <name|auto>', arg: true, run: (a) => setModel(a) },
   { cmd: '/export', desc: 'Download this chat as Markdown', run: () => $('#export-chat').click() },
   { cmd: '/theme', desc: 'Cycle light / dark / system', run: () => cycleTheme() },
@@ -646,16 +662,18 @@ $('#prompt').addEventListener('keydown', (e) => {
 let chatAbort = null;
 $('#stop').addEventListener('click', () => chatAbort?.abort());
 
-async function send(text) {
-  if (sending || !text.trim()) return;
+// approve: run the pending plan; text (optional) is sent as extra instructions.
+async function send(text, { approve = false } = {}) {
+  if (sending || (!approve && !text.trim())) return;
   text = text.trim();
-  const slash = /^\/(\w+)\s*(.*)$/.exec(text);
+  if (approve && pending.length) return toast('Remove the attached images before approving a plan', 'bad');
+  const slash = !approve && /^\/(\w+)\s*(.*)$/.exec(text);
   if (slash) {
     const s = SLASH.find((x) => x.cmd === `/${slash[1].toLowerCase()}`);
     if (s) { $('#prompt').value = ''; autosize(); return s.run(slash[2].trim()); }
   }
   sending = true;
-  remember(text);
+  if (text) remember(text);
   $('#send').disabled = true;
   $('#stop').hidden = false;
   const images = pending.map(({ name, mediaType, data }) => ({ name, mediaType, data }));
@@ -663,10 +681,13 @@ async function send(text) {
   $('#prompt').value = '';
   sessionStorage.removeItem(draftKey());
   autosize();
-  const userMsg = { role: 'user', text: images.length ? `${text}\n[${images.length} image${images.length > 1 ? 's' : ''} attached]` : text, shots };
+  const userMsg = approve
+    ? { role: 'user', text: text ? `Approved — run the plan.\n${text}` : 'Approved — run the plan.', approved: true }
+    : { role: 'user', text: images.length ? `${text}\n[${images.length} image${images.length > 1 ? 's' : ''} attached]` : text, shots };
   msgs.push(userMsg);
   const thread = $('#thread');
   thread.querySelector('.welcome')?.remove();
+  thread.querySelector('.plan-acts')?.remove();
   thread.append(messageEl(userMsg, msgs.length - 1));
 
   // Live bubble: deltas stream in as markdown; tool use and fallbacks appear as status lines.
@@ -683,10 +704,13 @@ async function send(text) {
   const tick = setInterval(() => ($('#busy').textContent = secs(Date.now() - started)), 250);
   chatAbort = new AbortController();
   try {
-    const r = await stream('/api/chat', {
-      conversationId: convId ?? undefined, prompt: text, taskType: $('#route').value, connector: $('#pin').value || undefined,
-      images: images.length ? images : undefined, project: $('#project-label').hidden ? undefined : $('#project').value || undefined,
-    }, (ev) => {
+    const req = approve
+      ? { conversationId: convId, approve: true, prompt: text || undefined, connector: $('#pin').value || undefined }
+      : {
+          conversationId: convId ?? undefined, prompt: text, taskType: $('#route').value, connector: $('#pin').value || undefined,
+          images: images.length ? images : undefined, project: $('#project-label').hidden ? undefined : $('#project').value || undefined,
+        };
+    const r = await stream('/api/chat', req, (ev) => {
       if (ev.type === 'attempt') { acc = ''; tools.replaceChildren(); status.textContent = `${ev.connector} · ${ev.model}…`; paint(); }
       else if (ev.type === 'delta') { acc += ev.text; if (!raf) raf = requestAnimationFrame(paint); }
       else if (ev.type === 'tool') { tools.append(h('div', { class: 'tool' }, `${ev.name}${ev.summary ? `: ${ev.summary}` : ''}`)); scrollDown(); }

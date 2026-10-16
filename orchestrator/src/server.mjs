@@ -189,8 +189,14 @@ export function createApp({ orchestrator, conversations, scheduler, saveConfig, 
   add('POST', '/api/chat', 'chat', async (c) => {
     const body = await readJson(c.req, MAX_BODY_IMAGES);
     const conv = body.conversationId && conversations ? conversations.get(body.conversationId) : null;
-    const { images, cwd, project } = await userCall(() => prepare(c, body, body.taskType || conv?.taskType, conv?.project));
-    return maybeStream(c, body, (extra) => userCall(() => orchestrator.chat({ conversationId: body.conversationId, prompt: body.prompt, taskType: body.taskType, connector: body.connector, images, cwd, project, ...extra })));
+    // Approving a plan runs it on the planning route's `then` route, in the folder that was planned.
+    const approval = body.approve ? orchestrator.approvalFor(body.conversationId) : null;
+    if (body.approve && !approval) throw new HttpError(400, 'There is no plan waiting for approval in this conversation');
+    if (approval && body.images !== undefined) throw new HttpError(400, 'Images cannot be attached to a plan approval');
+    const { images, cwd, project } = await userCall(() => approval
+      ? prepare(c, { project: approval.project }, approval.route, conv?.project)
+      : prepare(c, body, body.taskType || conv?.taskType, conv?.project));
+    return maybeStream(c, body, (extra) => userCall(() => orchestrator.chat({ conversationId: body.conversationId, prompt: body.prompt, taskType: body.taskType, connector: body.connector, images, cwd, project, approve: !!approval, ...extra })));
   });
   add('PATCH', '/api/conversations/:id', 'chat', async (c) => {
     const body = await readJson(c.req);

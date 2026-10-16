@@ -285,3 +285,8 @@ dialog::backdrop { background: rgba(10,14,22,.5); backdrop-filter: blur(2px); }
   .share-row { grid-template-columns: 100px 1fr 70px; }
 }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
+
+/* Plan -> approve -> run */
+.m.bot.plan .bubble { border-left: 3px solid var(--warn); }
+.plan-tag { font-size: 12px; font-weight: 600; color: var(--warn); margin-bottom: 6px; }
+.plan-acts { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 6px 0 2px; font-size: 13px; }

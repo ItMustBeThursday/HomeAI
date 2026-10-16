@@ -10,6 +10,14 @@ const AGENT_SYSTEM = [
   'You may run shell commands, read and edit files, run tests and use git. Make the change, run the relevant tests, and report what you did and the results.',
   'Rules: never touch anything under OneDrive; never print or commit secrets; do not delete files without a restorable backup; do not push or publish unless the user asked for it.',
 ].join(' ');
+const PLAN_SYSTEM = [
+  'You are HomeAI planning a change inside one project directory. You can only look: list, search and read files. Change nothing.',
+  'Inspect what is actually there, then reply with: 1) a short summary of the current layout that matters; 2) a numbered plan of exact operations (create/move/rename/edit/delete, with full relative paths);',
+  '3) references that must be updated so nothing breaks (imports, configs, scripts, docs, registered project paths, scheduled tasks); 4) risks, including anything that moves a running service or a folder registered in config/projects.json;',
+  '5) how each deletion is backed up; 6) how to verify the result. Keep it tight. End by asking the user to approve or change the plan.',
+  'Rules: never touch anything under OneDrive.',
+].join(' ');
+const APPROVED = 'The user approved the plan below. Carry it out step by step. If what you find differs from what the plan expected, stop and report instead of improvising. Finish with what you did, what you verified, and anything left undone.';
 
 export function createOrchestrator({ config, caps = {}, store, history, conversations, memory, run, limiter, now = Date.now, newId = randomUUID }) {
   validateRoutes(config);
@@ -34,6 +42,18 @@ export function createOrchestrator({ config, caps = {}, store, history, conversa
 
   const isAgentRoute = (taskType) => !!config.routes[routeFor(taskType, false)]?.agent;
 
+  // The plan waiting for approval and the route that carries it out, or null. A plan is pending when it is the
+  // last message, or only failed/stopped approval attempts follow it (so a failed run can be retried).
+  function pendingPlan(conv) {
+    const msgs = conv?.messages ?? [];
+    let i = msgs.length - 1;
+    while (i >= 2 && msgs[i].role === 'assistant' && msgs[i].error && msgs[i - 1].approved) i -= 2;
+    const last = msgs[i];
+    if (last?.role !== 'assistant' || !last.plan || !last.text) return null;
+    const then = config.routes[last.taskType]?.then;
+    return then ? { text: last.text, route: then, project: last.project } : null;
+  }
+
   // connector pins the request to one connector (still budget-checked); otherwise the route chain runs.
   // images: attachments already stored on disk. cwd: project directory (agent routes only).
   // onEvent receives {type:'attempt'|'delta'|'tool'|'attempt-failed', ...} while the model works; signal cancels.
@@ -48,10 +68,10 @@ export function createOrchestrator({ config, caps = {}, store, history, conversa
     let chain = resolveChain(config, route);
     if (connector) {
       const c = config.connectors[connector];
-      chain = [{ connector, kind: c.kind, model: c.model, maxTurns: r.maxTurns ?? 1, tools: r.tools ?? [], ...(c.vision ? { vision: true } : {}), ...(r.agent ? { agent: true } : {}) }];
+      chain = [{ connector, kind: c.kind, model: c.model, maxTurns: r.maxTurns ?? 1, tools: r.tools ?? [], ...(c.vision ? { vision: true } : {}), ...(r.agent ? { agent: true } : {}), ...(r.readOnly ? { readOnly: true } : {}) }];
     }
     let sys = system;
-    if (r.agent) sys = [AGENT_SYSTEM, sys].filter(Boolean).join('\n\n');
+    if (r.agent) sys = [r.readOnly ? PLAN_SYSTEM : AGENT_SYSTEM, sys].filter(Boolean).join('\n\n');
     if (r.memory && memory) {
       const mem = memory.context(prompt, { tags: Array.isArray(r.memory) ? r.memory : undefined });
       if (mem) sys = [sys, mem].filter(Boolean).join('\n\n');
@@ -108,18 +128,37 @@ export function createOrchestrator({ config, caps = {}, store, history, conversa
   }
 
   // Multi-turn chat: prior turns are folded into the prompt (the CLIs are stateless).
-  async function chat({ conversationId, prompt, taskType, connector, images = [], cwd, project, signal, onEvent } = {}) {
+  // approve: carry out the plan that ends the conversation, on the planning route's `then` route (prompt optional;
+  // it is added as extra instructions). The caller resolves cwd for that route (see approvalFor).
+  async function chat({ conversationId, prompt, taskType, connector, images = [], cwd, project, approve = false, signal, onEvent } = {}) {
     if (!conversations) throw new Error('Chat is not enabled');
-    if (typeof prompt !== 'string' || !prompt.trim()) throw new Error('prompt must be a non-empty string');
-    const conv = conversationId ? conversations.get(conversationId) : conversations.create({ title: prompt.trim().split('\n')[0], taskType, project });
-    if (!conv) throw new Error('Conversation not found');
-    const type = taskType || conv.taskType;
-    const reply = await task({ taskType: type, prompt: buildPrompt(conv.messages, prompt), system: CHAT_SYSTEM, connector, source: 'chat', conversationId: conv.id, images, cwd, signal, onEvent });
+    let conv;
+    let type;
+    let modelPrompt;
+    if (approve) {
+      conv = conversationId ? conversations.get(conversationId) : null;
+      if (!conv) throw new Error('Conversation not found');
+      const plan = pendingPlan(conv);
+      if (!plan) throw new Error('There is no plan waiting for approval in this conversation');
+      type = plan.route;
+      const note = typeof prompt === 'string' ? prompt.trim() : '';
+      prompt = note ? `Approved — run the plan.\n${note}` : 'Approved — run the plan.';
+      // Earlier turns for context; the plan itself goes in whole rather than through the clipped history.
+      modelPrompt = buildPrompt(conv.messages.slice(0, -1), `${APPROVED}${note ? `\n\nExtra instructions from the user:\n${note}` : ''}\n\nApproved plan:\n${plan.text}`);
+    } else {
+      if (typeof prompt !== 'string' || !prompt.trim()) throw new Error('prompt must be a non-empty string');
+      conv = conversationId ? conversations.get(conversationId) : conversations.create({ title: prompt.trim().split('\n')[0], taskType, project });
+      if (!conv) throw new Error('Conversation not found');
+      type = taskType || conv.taskType;
+      modelPrompt = buildPrompt(conv.messages, prompt);
+    }
+    const reply = await task({ taskType: type, prompt: modelPrompt, system: CHAT_SYSTEM, connector, source: 'chat', conversationId: conv.id, images, cwd, signal, onEvent });
     const refs = images.map(({ id, name, mediaType }) => ({ id, name, mediaType }));
-    const userMsg = { role: 'user', text: prompt, ts: now(), ...(refs.length ? { images: refs } : {}) };
+    const userMsg = { role: 'user', text: prompt, ts: now(), ...(refs.length ? { images: refs } : {}), ...(approve ? { approved: true } : {}) };
+    const where = cwd && project ? { project } : {};
     const botMsg = reply.ok
-      ? { role: 'assistant', text: reply.text, ts: now(), taskId: reply.id, connector: reply.connector, model: reply.model, taskType: reply.taskType, ms: reply.ms }
-      : { role: 'assistant', text: '', error: reply.error, ts: now(), taskId: reply.id, taskType: reply.taskType };
+      ? { role: 'assistant', text: reply.text, ts: now(), taskId: reply.id, connector: reply.connector, model: reply.model, taskType: reply.taskType, ms: reply.ms, ...where, ...(config.routes[reply.taskType]?.readOnly ? { plan: true } : {}) }
+      : { role: 'assistant', text: '', error: reply.error, ts: now(), taskId: reply.id, taskType: reply.taskType, ...where };
     const saved = conversations.append(conv.id, userMsg, botMsg);
     return { conversation: { id: saved.id, title: saved.title, project: saved.project }, reply };
   }
@@ -130,6 +169,11 @@ export function createOrchestrator({ config, caps = {}, store, history, conversa
     history,
     memory,
     isAgentRoute,
+    // For the server: which route and project an approval in this conversation would run on, or null.
+    approvalFor: (conversationId) => {
+      const plan = conversations && conversationId ? pendingPlan(conversations.get(conversationId)) : null;
+      return plan && { route: plan.route, project: plan.project };
+    },
     usage: (sinceMs) => summarize(entries, sinceMs),
     budget: (connector, taskType) => checkBudget(entries, caps, connector, taskType, now()),
     capStatus: () => capStatus(entries, caps, now()),

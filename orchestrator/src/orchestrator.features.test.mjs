@@ -131,3 +131,52 @@ test('chat stores image references and the project, and tells later turns an ima
   assert.equal(conversations.get(agentChat.conversation.id).project, 'orchestrator');
   assert.equal(agentChat.conversation.project, 'orchestrator');
 });
+
+test('plan routes: validation of readOnly/then', () => {
+  const base = (routes) => ({ connectors: config.connectors, routes: { general: { chain: ['text'] }, ...routes }, default: 'general' });
+  assert.throws(() => createOrchestrator({ config: base({ p: { chain: ['cloud'], readOnly: true } }), run: async () => ok('x') }), /only applies to agent/);
+  assert.throws(() => createOrchestrator({ config: base({ p: { chain: ['cloud'], agent: true, readOnly: true, then: 'general' } }), run: async () => ok('x') }), /then must name an agent route/);
+  assert.throws(() => createOrchestrator({ config: base({ a: { chain: ['cloud'], agent: true }, p: { chain: ['cloud'], agent: true, then: 'a' } }), run: async () => ok('x') }), /then only applies/);
+});
+
+test('plan, then approve: the plan runs read-only, approval runs it on the then route with the plan in full', async () => {
+  const cfg = { ...config, routes: { ...config.routes, plan: { chain: ['cloud'], agent: true, readOnly: true, then: 'agent', tools: ['Read'] } } };
+  const conversations = createConversationStore(mkdtempSync(join(tmpdir(), 'conv-')));
+  const calls = [];
+  const replies = ['1. move a to b', 'done'];
+  const o = createOrchestrator({ config: cfg, conversations, run: async (e, p) => (calls.push({ e, p }), ok(replies.shift())) });
+  const first = await o.chat({ prompt: 'tidy the folder', taskType: 'plan', cwd: 'D:\\proj', project: 'proj' });
+  assert.equal(calls[0].e.readOnly, true);
+  assert.match(calls[0].p.system, /Change nothing/);
+  const id = first.conversation.id;
+  assert.equal(conversations.get(id).messages[1].plan, true);
+  assert.deepEqual(o.approvalFor(id), { route: 'agent', project: 'proj' });
+
+  const r = await o.chat({ conversationId: id, approve: true, prompt: 'skip the docs folder', cwd: 'D:\\proj', project: 'proj' });
+  assert.equal(r.reply.taskType, 'agent');
+  assert.equal(calls[1].e.readOnly, undefined);
+  assert.match(calls[1].p.system, /coding and operations agent/);
+  assert.match(calls[1].p.prompt, /approved the plan[\s\S]*skip the docs folder[\s\S]*Approved plan:\n1\. move a to b/);
+  const msgs = conversations.get(id).messages;
+  assert.equal(msgs[2].approved, true);
+  assert.equal(msgs[2].text, 'Approved — run the plan.\nskip the docs folder');
+  assert.equal(msgs[3].plan, undefined);
+  // Once carried out, there is nothing left to approve.
+  assert.equal(o.approvalFor(id), null);
+  await assert.rejects(o.chat({ conversationId: id, approve: true, cwd: 'D:\\proj' }), /no plan waiting/);
+});
+
+test('a failed approval run leaves the plan approvable; a normal reply after it does not', async () => {
+  const cfg = { ...config, routes: { ...config.routes, plan: { chain: ['cloud'], agent: true, readOnly: true, then: 'agent' } } };
+  const conversations = createConversationStore(mkdtempSync(join(tmpdir(), 'conv-')));
+  let fail = false;
+  const o = createOrchestrator({ config: cfg, conversations, run: async () => (fail ? { ok: false, error: 'boom' } : ok('the plan')) });
+  const { conversation: { id } } = await o.chat({ prompt: 'p', taskType: 'plan', cwd: 'D:\\proj', project: 'proj' });
+  fail = true;
+  const r = await o.chat({ conversationId: id, approve: true, cwd: 'D:\\proj' });
+  assert.equal(r.reply.ok, false);
+  assert.deepEqual(o.approvalFor(id), { route: 'agent', project: 'proj' });
+  fail = false;
+  await o.chat({ conversationId: id, prompt: 'actually, never mind', taskType: 'general' });
+  assert.equal(o.approvalFor(id), null);
+});
