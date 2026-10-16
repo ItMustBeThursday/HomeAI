@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
   <title>HomeAI</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%234f6bed'/%3E%3Ctext x='16' y='22.5' font-family='Arial' font-weight='700' font-size='19' text-anchor='middle' fill='white'%3EH%3C/text%3E%3C/svg%3E">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -24,12 +25,14 @@
       <button id="new-chat" class="primary block"><span class="ico" data-icon="plus"></span>New chat</button>
       <input id="conv-search" type="search" placeholder="Filter conversations" aria-label="Filter conversations">
       <div id="conv-list" class="conv-list" role="list"></div>
+      <button id="manage-chats" class="ghost sm" data-go="chats">Manage all chats…</button>
     </div>
     <div class="side-foot">
       <button id="theme-quick" class="nav-item" title="Cycle theme"><span class="ico" data-icon="sun"></span><span class="lbl">Theme</span></button>
       <button data-tab="settings" class="nav-item"><span class="ico" data-icon="sliders"></span><span class="lbl">Settings</span></button>
     </div>
   </aside>
+  <div id="side-resize" class="side-resize" role="separator" aria-orientation="vertical" aria-label="Resize sidebar" tabindex="0" title="Drag to resize · double-click to reset"></div>
 
   <div class="content">
     <header class="topbar">
@@ -37,7 +40,13 @@
       <h1 id="page-title">Chat</h1>
       <span id="page-sub" class="muted"></span>
       <span class="spacer"></span>
-      <span id="who" class="chip" hidden></span>
+      <button id="top-new" class="ghost sm" title="New chat (Ctrl+Shift+O)">+ New chat</button>
+      <button id="top-search" class="icon-btn" data-icon="search" title="Search and commands (Ctrl+K)" aria-label="Search and commands"></button>
+      <button id="top-theme" class="icon-btn" title="Cycle theme" aria-label="Cycle theme"></button>
+      <div class="menu-wrap">
+        <button id="who" class="chip" aria-haspopup="menu" aria-expanded="false" title="Account and access" hidden></button>
+        <div id="user-menu" class="menu" role="menu" hidden></div>
+      </div>
     </header>
 
     <main>
@@ -52,6 +61,7 @@
             <button id="export-chat" class="ghost sm" hidden>Export</button>
             <button id="rename-chat" class="ghost sm" hidden>Rename</button>
             <button id="archive-chat" class="ghost sm" hidden>Archive</button>
+            <button id="delete-chat" class="ghost sm danger" hidden>Delete</button>
           </div>
           <div class="thread-scroll">
             <div id="thread" class="thread" aria-live="polite"></div>
@@ -75,6 +85,21 @@
             </div>
           </form>
         </div>
+      </section>
+
+      <!-- CHATS (manager) -->
+      <section id="tab-chats" class="tab page">
+        <div class="toolbar">
+          <input id="chats-search" type="search" placeholder="Search titles and last prompts…" size="34" aria-label="Search chats">
+          <div id="chats-state" class="seg" role="tablist" aria-label="Which chats"></div>
+          <label class="sel">Route <select id="chats-route"><option value="">All</option></select></label>
+          <label class="sel">Sort <select id="chats-sort"><option value="recent">Most recent</option><option value="oldest">Oldest</option><option value="title">Title</option><option value="size">Most messages</option></select></label>
+          <span class="spacer"></span>
+          <button id="chats-new" class="primary sm">+ New chat</button>
+        </div>
+        <div id="chats-bulk" class="bulk" hidden></div>
+        <div id="chats-table"></div>
+        <p id="chats-note" class="muted mt"></p>
       </section>
 
       <!-- OVERVIEW -->

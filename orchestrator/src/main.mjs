@@ -99,7 +99,9 @@ const grants = createGrants({ file: join(dataDir, 'grants.json') });
 const systemAccess = createSystemAccess({ config: optionalJson(files.systemAccess, { enabled: false }) });
 
 const orchestrator = createOrchestrator({
-  dirsFor: (o) => [...new Set([...grants.dirs(o), ...systemAccess.dirs()])],
+  // Codex's Windows sandbox must add an ACE to every --add-dir root and aborts the whole run if any fails
+  // (C:\Windows, D:\ etc. always fail without admin), so Codex gets explicit grants only, not whole-machine dirs.
+  dirsFor: (o) => [...new Set([...grants.dirs(o), ...(o?.kind === 'codex-cli' ? [] : systemAccess.dirs())])],
   config: readJson(files.routes),
   caps: readJson(files.budgets),
   store: createLedgerStore(join(dataDir, 'ledger.jsonl')),

@@ -1,24 +1,155 @@
 {
   "connectors": {
-    "local-fast": { "kind": "ollama", "model": "homeai-fast:locked" },
-    "local-main": { "kind": "ollama", "model": "homeai-main:locked" },
-    "local-coder": { "kind": "ollama", "model": "homeai-coder:locked" },
-    "local-vision": { "kind": "ollama", "model": "homeai-vision:locked", "vision": true },
-    "claude-haiku": { "kind": "claude-cli", "model": "haiku" },
-    "claude-sonnet": { "kind": "claude-cli", "model": "sonnet" },
-    "claude-opus": { "kind": "claude-cli", "model": "opus" },
-    "codex": { "kind": "codex-cli", "model": "gpt-6.1-sol" }
+    "local-fast": {
+      "kind": "ollama",
+      "model": "homeai-fast:locked"
+    },
+    "local-main": {
+      "kind": "ollama",
+      "model": "homeai-main:locked"
+    },
+    "local-coder": {
+      "kind": "ollama",
+      "model": "homeai-coder:locked"
+    },
+    "local-vision": {
+      "kind": "ollama",
+      "model": "homeai-vision:locked",
+      "vision": true
+    },
+    "claude-haiku": {
+      "kind": "claude-cli",
+      "model": "haiku"
+    },
+    "claude-sonnet": {
+      "kind": "claude-cli",
+      "model": "sonnet"
+    },
+    "claude-opus": {
+      "kind": "claude-cli",
+      "model": "opus"
+    },
+    "codex": {
+      "kind": "codex-cli",
+      "model": "gpt-6.1-sol"
+    },
+    "local-deep": {
+      "kind": "ollama",
+      "model": "homeai-deep:locked"
+    },
+    "local-giant": {
+      "kind": "ollama",
+      "model": "homeai-giant:locked"
+    }
   },
   "routes": {
-    "quick": { "chain": ["local-fast", "claude-haiku"] },
-    "general": { "chain": ["local-main", "claude-sonnet"], "memory": true },
-    "coding": { "chain": ["codex", "local-coder", "claude-sonnet"], "memory": true },
-    "review": { "chain": ["claude-sonnet", "local-main"], "memory": true },
-    "planning": { "chain": ["claude-opus", "claude-sonnet", "local-main"], "memory": true },
-    "vision": { "chain": ["local-vision", "claude-sonnet"] },
-    "plan": { "chain": ["claude-sonnet", "codex"], "agent": true, "readOnly": true, "then": "agent", "maxTurns": 25, "tools": ["Read", "Glob", "Grep"], "memory": true },
-    "agent": { "chain": ["claude-sonnet", "codex"], "agent": true, "maxTurns": 40, "tools": ["Bash", "Read", "Edit", "Write", "Glob", "Grep", "WebFetch", "WebSearch"], "memory": true }
+    "quick": {
+      "chain": [
+        "local-fast",
+        "claude-haiku"
+      ]
+    },
+    "general": {
+      "chain": [
+        "local-main",
+        "claude-sonnet"
+      ],
+      "memory": true
+    },
+    "coding": {
+      "chain": [
+        "codex",
+        "local-coder",
+        "claude-sonnet"
+      ],
+      "memory": true
+    },
+    "review": {
+      "chain": [
+        "claude-sonnet",
+        "local-main"
+      ],
+      "memory": true
+    },
+    "planning": {
+      "chain": [
+        "claude-opus",
+        "claude-sonnet",
+        "local-main"
+      ],
+      "memory": true
+    },
+    "vision": {
+      "chain": [
+        "local-vision",
+        "claude-sonnet"
+      ]
+    },
+    "plan": {
+      "chain": [
+        "claude-sonnet",
+        "codex"
+      ],
+      "agent": true,
+      "readOnly": true,
+      "then": "agent",
+      "maxTurns": 25,
+      "tools": [
+        "Read",
+        "Glob",
+        "Grep"
+      ],
+      "memory": true
+    },
+    "agent": {
+      "chain": [
+        "claude-sonnet",
+        "codex"
+      ],
+      "agent": true,
+      "maxTurns": 40,
+      "tools": [
+        "Bash",
+        "Read",
+        "Edit",
+        "Write",
+        "Glob",
+        "Grep",
+        "WebFetch",
+        "WebSearch"
+      ],
+      "memory": true
+    },
+    "deep": {
+      "chain": [
+        "local-deep",
+        "local-main",
+        "claude-sonnet"
+      ],
+      "memory": true
+    },
+    "reasoning": {
+      "chain": [
+        "local-giant",
+        "local-deep",
+        "claude-opus"
+      ],
+      "memory": true
+    }
   },
-  "auto": { "chat": "general", "act": "agent", "plan": "plan", "check": ["local-main", "local-fast", "local-vision", "local-coder"], "fallback": "act", "timeoutMs": 8000, "coldTimeoutMs": 30000 },
+  "auto": {
+    "chat": "general",
+    "act": "agent",
+    "plan": "plan",
+    "check": [
+      "local-main",
+      "local-fast",
+      "local-vision",
+      "local-coder"
+    ],
+    "fallback": "act",
+    "timeoutMs": 8000,
+    "coldTimeoutMs": 30000
+  },
   "default": "general"
 }

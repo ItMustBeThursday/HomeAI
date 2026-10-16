@@ -91,6 +91,21 @@ test('chat creates a conversation, continues it, and lists/renames/archives', as
   assert.equal((await call('POST', '/api/chat', { headers: H, body: '{"conversationId":"missing-id-123","prompt":"x"}' })).status, 404);
 });
 
+test('conversations: archived/trash lists, trash and restore over HTTP', async () => {
+  const id = json(await call('POST', '/api/chat', { headers: H, body: JSON.stringify({ prompt: 'keep me' }) })).conversation.id;
+  assert.equal((await call('POST', `/api/conversations/${id}/trash`, { headers: H, body: '{}' })).status, 200);
+  assert.ok(!json(await call('GET', '/api/conversations', { headers: auth })).conversations.some((c) => c.id === id));
+  const trash = json(await call('GET', '/api/conversations?state=trash', { headers: auth }));
+  assert.equal(trash.state, 'trash');
+  assert.ok(trash.conversations.some((c) => c.id === id));
+  assert.equal((await call('GET', '/api/conversations?state=nope', { headers: auth })).status, 400);
+  assert.equal((await call('POST', `/api/conversations/${id}/restore`, { headers: H, body: '{}' })).status, 200);
+  assert.ok(json(await call('GET', '/api/conversations', { headers: auth })).conversations.some((c) => c.id === id));
+  assert.equal((await call('POST', '/api/conversations/missing-id-123/restore', { headers: H, body: '{}' })).status, 404);
+  await call('DELETE', `/api/conversations/${id}`, { headers: auth });
+  assert.ok(json(await call('GET', '/api/conversations?state=archived', { headers: auth })).conversations.some((c) => c.id === id));
+});
+
 test('history, usage caps and status', async () => {
   const h = json(await call('GET', '/api/history?limit=5', { headers: auth }));
   assert.ok(h.tasks.length >= 1);

@@ -112,7 +112,7 @@ export function createOrchestrator({ config, caps = {}, store, history, conversa
       const emit = (ev) => onEvent?.({ ...ev, connector: entry.connector });
       const call = () => {
         if (signal?.aborted) throw Object.assign(new Error('Cancelled'), { cancelled: true });
-        return run(entry, { prompt, system: sys, images, cwd, addDirs: [...addDirs, ...(dirsFor?.({ readOnly: !!entry.readOnly }) ?? [])], signal, onEvent: onEvent ? emit : undefined });
+        return run(entry, { prompt, system: sys, images, cwd, addDirs: [...addDirs, ...(dirsFor?.({ readOnly: !!entry.readOnly, kind: entry.kind }) ?? [])], signal, onEvent: onEvent ? emit : undefined });
       };
       let out;
       try {

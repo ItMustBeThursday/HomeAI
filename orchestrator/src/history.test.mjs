@@ -30,6 +30,31 @@ test('buildPrompt folds recent turns within the limit', () => {
   assert.match(p, /User's new message:\nnew$/);
 });
 
+test('conversations: archived and trash lists, trash and restore', () => {
+  const dir = tmp();
+  let t = 0;
+  let n = 0;
+  const s = createConversationStore(dir, { now: () => ++t, newId: () => `conv-100${++n}` });
+  const a = s.create({ title: 'a' });
+  const b = s.create({ title: 'b' });
+  const c = s.create({ title: 'c' });
+  s.append(a.id, { role: 'user', text: 'hello   there' });
+  s.archive(a.id);
+  s.trash(b.id);
+  assert.deepEqual(s.list().map((x) => x.id), [c.id]);
+  assert.deepEqual(s.list('archived').map((x) => x.id), [a.id]);
+  assert.equal(s.list('archived')[0].preview, 'hello there');
+  assert.deepEqual(s.list('trash').map((x) => x.id), [b.id]);
+  assert.ok(existsSync(join(dir, 'trash', `${b.id}.json`)));
+  s.trash(a.id); // archived -> trash works too
+  assert.deepEqual(s.list('trash').map((x) => x.id).sort(), [a.id, b.id].sort());
+  assert.equal(s.restore(a.id).title, 'a');
+  assert.deepEqual(s.list().map((x) => x.id).sort(), [a.id, c.id].sort());
+  assert.throws(() => s.restore(a.id), /not found/);
+  assert.throws(() => s.trash('missing-id'), /not found/);
+  assert.throws(() => s.list('bogus'), /state must be/);
+});
+
 test('conversations: create, append, rename, list, archive', () => {
   const dir = tmp();
   let t = 0;

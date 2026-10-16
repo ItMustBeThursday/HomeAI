@@ -1,5 +1,5 @@
 // Task history (data/tasks.jsonl) and chat conversations (data/conversations/<id>.json). Local only.
-import { appendFileSync, mkdirSync, readFileSync, writeFileSync, renameSync, readdirSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { rotateIfLarge } from './rotate.mjs';
@@ -56,7 +56,10 @@ const ID = /^[a-z0-9-]{8,64}$/;
 
 export function createConversationStore(dir, { now = Date.now, newId = randomUUID } = {}) {
   const archiveDir = join(dir, 'archive');
+  const trashDir = join(dir, 'trash');
   mkdirSync(archiveDir, { recursive: true });
+  mkdirSync(trashDir, { recursive: true });
+  const STATES = { active: dir, archived: archiveDir, trash: trashDir };
   const path = (id) => {
     if (typeof id !== 'string' || !ID.test(id)) throw new Error('Invalid conversation id');
     return join(dir, `${id}.json`);
@@ -119,13 +122,32 @@ export function createConversationStore(dir, { now = Date.now, newId = randomUUI
       if (!read(id)) throw new Error('Conversation not found');
       renameSync(file, join(archiveDir, `${id}.json`));
     },
-    list() {
+    // Delete = move to data/conversations/trash. Still on disk and restorable; nothing is erased.
+    trash(id) {
+      const file = path(id);
+      const from = existsSync(file) ? file : join(archiveDir, `${id}.json`);
+      if (!existsSync(from)) throw new Error('Conversation not found');
+      renameSync(from, join(trashDir, `${id}.json`));
+    },
+    // Move an archived or trashed conversation back to the active list.
+    restore(id) {
+      const file = path(id);
+      for (const d of [archiveDir, trashDir]) {
+        const from = join(d, `${id}.json`);
+        if (existsSync(from)) { renameSync(from, file); return read(id); }
+      }
+      throw new Error('Conversation not found');
+    },
+    list(state = 'active') {
+      const base = STATES[state];
+      if (!base) throw new Error('state must be active, archived or trash');
       const out = [];
-      for (const name of readdirSync(dir)) {
+      for (const name of readdirSync(base)) {
         if (!name.endsWith('.json')) continue;
         try {
-          const c = JSON.parse(readFileSync(join(dir, name), 'utf8'));
-          out.push({ id: c.id, title: c.title, taskType: c.taskType, updated: c.updated, count: c.messages.length });
+          const c = JSON.parse(readFileSync(join(base, name), 'utf8'));
+          const last = c.messages.filter((m) => m.role === 'user').at(-1)?.text;
+          out.push({ id: c.id, title: c.title, taskType: c.taskType, project: c.project, created: c.created, updated: c.updated, count: c.messages.length, preview: last ? clip(String(last).replace(/\s+/g, ' '), 140) : '' });
         } catch {}
       }
       return out.sort((a, b) => b.updated - a.updated);

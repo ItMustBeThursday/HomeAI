@@ -204,3 +204,15 @@ test('conversation notes reach the model on later turns; extra folders reach age
   await o.task({ taskType: 'agent', prompt: 'do', cwd: 'D:\p', addDirs: ['X:\once'] });
   assert.deepEqual(calls.at(-1).addDirs, ['X:\once', 'W:\rw']);
 });
+
+test('dirsFor learns the connector kind so Codex can be kept off whole-machine roots', async () => {
+  const seen = [];
+  const o = createOrchestrator({
+    config,
+    dirsFor: (opts) => (seen.push(opts), []),
+    run: async () => ok('reply'),
+  });
+  await o.task({ taskType: 'agent', prompt: 'do', cwd: 'D:\\p' });
+  assert.ok(seen.length > 0);
+  assert.ok(seen.every((s) => typeof s.kind === 'string' && 'readOnly' in s));
+});

@@ -169,7 +169,11 @@ export function createApp({ orchestrator, conversations, scheduler, jobs, grants
     return { tasks: orchestrator.history?.list(limit) ?? [] };
   });
   add('GET', '/api/schedule', 'read', () => ({ ...need(scheduler, 'Scheduler').list(), queue: orchestrator.queue() }));
-  add('GET', '/api/conversations', 'read', () => ({ conversations: need(conversations, 'Chat').list() }));
+  add('GET', '/api/conversations', 'read', (c) => {
+    const state = c.url.searchParams.get('state') ?? 'active';
+    if (!['active', 'archived', 'trash'].includes(state)) throw new HttpError(400, 'state must be active, archived or trash');
+    return { state, conversations: need(conversations, 'Chat').list(state) };
+  });
   add('GET', '/api/conversations/:id', 'read', (c) => userCall(() => need(conversations, 'Chat').get(c.params.id) ?? Promise.reject(new Error('Conversation not found'))));
   add('GET', '/api/projects', 'read', () => ({ default: need(shell, 'Shell access').default, projects: shell.projects() }));
   add('GET', '/api/memory', 'read', (c) => {
@@ -275,6 +279,9 @@ export function createApp({ orchestrator, conversations, scheduler, jobs, grants
   });
   add('DELETE', '/api/conversations/:id/notes/:noteId', 'chat', (c) => userCall(() => ({ notes: need(conversations, 'Chat').removeNote(c.params.id, c.params.noteId) })));
   add('DELETE', '/api/conversations/:id', 'chat', (c) => userCall(() => (need(conversations, 'Chat').archive(c.params.id), { ok: true, archived: c.params.id })));
+  // Delete = move to data/conversations/trash (restorable). Restore works from archive or trash.
+  add('POST', '/api/conversations/:id/trash', 'chat', (c) => userCall(() => (need(conversations, 'Chat').trash(c.params.id), { ok: true, trashed: c.params.id })));
+  add('POST', '/api/conversations/:id/restore', 'chat', (c) => userCall(() => ({ ok: true, conversation: need(conversations, 'Chat').restore(c.params.id) })));
   add('GET', '/api/attachments/:id', 'read', async (c) => {
     const f = await userCall(() => need(attachments, 'Image attachments').file(c.params.id));
     if (!f) throw new HttpError(404, 'Attachment not found');

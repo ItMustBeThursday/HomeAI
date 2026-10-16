@@ -44,6 +44,8 @@ const ICONS = {
   panel: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/>',
   menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
   queue: '<path d="M4 6h16M4 12h16M4 18h10"/><path d="M18 15l3 3-3 3"/>',
+  archive: '<rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8M10 12h4"/>',
+  trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-12M9 7V4h6v3"/>',
 };
 function icon(name) {
   const s = h('span', { class: 'ico' });
@@ -59,7 +61,7 @@ function paintIcons(root = document) {
 }
 
 // ---- Persistent UI settings ----
-const DEFAULTS = { theme: 'system', accent: '#4f6bed', density: 'comfortable', width: 'normal', enterSends: true, showMeta: true, collapsed: false };
+const DEFAULTS = { theme: 'system', accent: '#4f6bed', density: 'comfortable', width: 'normal', enterSends: true, showMeta: true, collapsed: false, sideW: 0 };
 const ui = { ...DEFAULTS, ...JSON.parse(localStorage.getItem('homeai-ui') || '{}') };
 const saveUi = () => localStorage.setItem('homeai-ui', JSON.stringify(ui));
 function applyUi() {
@@ -69,14 +71,30 @@ function applyUi() {
   r.dataset.width = ui.width === 'normal' ? '' : ui.width;
   r.style.setProperty('--accent', ui.accent);
   $('#app').classList.toggle('collapsed', ui.collapsed);
+  applySideWidth();
+  paintThemeButton();
+}
+const SIDE_MIN = 200;
+const SIDE_MAX = 560;
+function applySideWidth() {
+  const w = Math.round(Number(ui.sideW));
+  document.documentElement.style.setProperty('--side-w', w >= SIDE_MIN ? `${Math.min(w, SIDE_MAX)}px` : '');
+}
+function paintThemeButton() {
+  const b = $('#top-theme');
+  if (!b) return;
+  const dark = ui.theme === 'dark' || (ui.theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
+  b.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[dark ? 'moon' : 'sun']}</svg>`;
+  b.title = `Theme: ${ui.theme} (click to change)`;
 }
 const ACCENTS = ['#4f6bed', '#7c5cf0', '#0e9f8e', '#d9534f', '#d98a00', '#2f855a', '#3d3f4a'];
 
 // ---- Toasts & dialogs ----
-function toast(text, kind = '') {
+function toast(text, kind = '', action = null) {
   const t = h('div', { class: `toast ${kind}` }, text);
+  if (action) t.append(h('button', { class: 'ghost tact', onclick: () => { t.remove(); action.run(); } }, action.label));
   $('#toasts').append(t);
-  setTimeout(() => t.remove(), kind === 'bad' ? 7000 : 3500);
+  setTimeout(() => t.remove(), action ? 9000 : kind === 'bad' ? 7000 : 3500);
 }
 function ask(title, message, value = '') {
   return new Promise((resolve) => {
@@ -274,9 +292,9 @@ const TABS = [
   { id: 'devices', label: 'Devices', icon: 'devices', group: 'Admin', feature: 'devices', admin: true },
   { id: 'logan', label: 'Logan', icon: 'tv', group: 'Admin' },
 ];
-const TITLES = { ...Object.fromEntries(TABS.map((t) => [t.id, t.label])), settings: 'Settings' };
+const TITLES = { ...Object.fromEntries(TABS.map((t) => [t.id, t.label])), chats: 'All chats', settings: 'Settings' };
 const SUBS = {
-  chat: 'Route-aware conversations', jobs: 'Queue work and walk away', overview: 'Everything at a glance', terminal: 'Interactive shells, any folder', projects: 'Tests, git and GitHub',
+  chat: 'Route-aware conversations', chats: 'Open, archive, delete and restore conversations', jobs: 'Queue work and walk away', overview: 'Everything at a glance', terminal: 'Interactive shells, any folder', projects: 'Tests, git and GitHub',
   memory: 'Durable facts the models can see', usage: 'Tokens, calls and budgets', history: 'Every task and its fallbacks', status: 'Backend and model health',
   schedule: 'Timed jobs and the request queue', config: 'Routes, connectors and budgets', connections: 'Logins for GitHub and other services', devices: 'Tokens for phones and displays', logan: 'Menu catalog (coming)', settings: 'Appearance and shortcuts',
 };
@@ -295,8 +313,9 @@ function buildNav() {
   let group = '';
   for (const t of TABS) {
     if (t.group !== group) { group = t.group; nav.append(h('div', { class: 'nav-group' }, group)); }
-    const btn = h('button', { class: 'nav-item', 'data-tab': t.id, 'data-feature': t.feature, 'data-admin': t.admin ? '1' : null, title: t.label }, icon(t.icon), h('span', { class: 'lbl' }, t.label));
+    const btn = h('button', { class: 'nav-item', 'data-tab': t.id === 'chat' ? 'chats' : t.id, 'data-nav': t.id, 'data-feature': t.feature, 'data-admin': t.admin ? '1' : null, title: t.label }, icon(t.icon), h('span', { class: 'lbl' }, t.label));
     if (t.id !== 'chat') { nav.append(btn); continue; }
+    btn.title = 'All chats: open, archive or delete';
     // Chat: a row with a chevron that drops down the conversation list right under it.
     const chev = h('button', { id: 'conv-toggle', class: 'chev', title: 'Show or hide conversations', 'aria-label': 'Show or hide conversations', 'aria-expanded': 'false' }, '▾');
     chev.addEventListener('click', () => { ui.convOpen = !convOpenNow(); saveUi(); applyConvPanel(); });
@@ -312,7 +331,7 @@ let current = 'chat';
 function show(tab) {
   if (!TITLES[tab]) tab = 'chat';
   current = tab;
-  for (const b of $$('[data-tab]')) if (b.classList.contains('nav-item')) b.classList.toggle('active', b.dataset.tab === tab);
+  for (const b of $$('[data-tab]')) if (b.classList.contains('nav-item')) b.classList.toggle('active', b.dataset.tab === tab || (tab === 'chat' && b.dataset.tab === 'chats'));
   for (const s of $$('.tab')) s.classList.toggle('active', s.id === `tab-${tab}`);
   $('#page-title').textContent = TITLES[tab];
   $('#page-sub').textContent = SUBS[tab] ?? '';
@@ -382,7 +401,7 @@ function applyFeatures() {
   });
   const chip = $('#who');
   chip.hidden = !whoami;
-  if (whoami) chip.textContent = `${whoami.name} · ${whoami.scopes.join(', ')}`;
+  if (whoami) chip.textContent = `${whoami.name} · ${whoami.scopes.includes('admin') ? 'admin' : whoami.scopes.join(', ')}`;
 }
 
 // ---- Chat state ----
@@ -505,7 +524,10 @@ function renderConversations() {
     for (const c of sections.get(g)) {
       el.append(h('div', { class: `conv${c.id === convId ? ' active' : ''}`, role: 'listitem', tabindex: '0', title: `${c.title}\n${when(c.updated)} · ${c.count} messages`,
         onclick: () => { show('chat'); openConversation(c.id); }, onkeydown: (e) => e.key === 'Enter' && (show('chat'), openConversation(c.id)) },
-      pins.has(c.id) ? h('span', { class: 'pin' }, '●') : null, h('span', { class: 't' }, c.title)));
+      pins.has(c.id) ? h('span', { class: 'pin' }, '●') : null, h('span', { class: 't' }, c.title),
+      h('span', { class: 'ca' },
+        h('button', { type: 'button', title: 'Archive', 'aria-label': `Archive ${c.title}`, onclick: (e) => { e.stopPropagation(); archiveConv(c.id, c.title); } }, icon('archive')),
+        h('button', { type: 'button', class: 'del', title: 'Delete (moves to trash, can be restored)', 'aria-label': `Delete ${c.title}`, onclick: (e) => { e.stopPropagation(); trashConv(c.id, c.title); } }, icon('trash')))));
     }
   }
 }
@@ -519,7 +541,7 @@ async function loadConversations() {
 function setHead(title) {
   $('#conv-title').textContent = title;
   const has = !!convId;
-  for (const id of ['#rename-chat', '#archive-chat', '#export-chat', '#pin-chat']) $(id).hidden = !has;
+  for (const id of ['#rename-chat', '#archive-chat', '#delete-chat', '#export-chat', '#pin-chat']) $(id).hidden = !has;
   $('#pin-chat').textContent = pins.has(convId) ? 'Unpin' : 'Pin';
   const c = convs.find((x) => x.id === convId);
   $('#conv-meta').textContent = c ? `${c.count} messages` : '';
@@ -555,14 +577,8 @@ $('#rename-chat').addEventListener('click', async () => {
   setHead(title.trim());
   loadConversations();
 });
-$('#archive-chat').addEventListener('click', async () => {
-  if (!confirm('Archive this conversation? It is moved to data/conversations/archive, not deleted.')) return;
-  await api(`/api/conversations/${encodeURIComponent(convId)}`, { method: 'DELETE' });
-  pins.delete(convId);
-  savePins();
-  toast('Archived', 'ok');
-  openConversation(null);
-});
+$('#archive-chat').addEventListener('click', () => archiveConv(convId, $('#conv-title').textContent));
+$('#delete-chat').addEventListener('click', () => trashConv(convId, $('#conv-title').textContent));
 $('#pin-chat').addEventListener('click', () => {
   if (pins.has(convId)) pins.delete(convId); else pins.add(convId);
   savePins();
@@ -574,6 +590,118 @@ $('#export-chat').addEventListener('click', () => {
   const md = [`# ${title}`, '', ...msgs.map((m) => (m.role === 'user' ? `**You:**\n\n${m.text}\n` : `**${m.connector ?? 'Assistant'}:**\n\n${m.text ?? `(error: ${m.error})`}\n`))].join('\n');
   download(`${title.replace(/[^\w.-]+/g, '_').slice(0, 60) || 'chat'}.md`, md);
 });
+
+// ---- Archive / delete / restore (delete = trash folder, always restorable) ----
+const refreshChatLists = async () => { await loadConversations(); if (current === 'chats') await loadChats(); };
+async function afterRemoved(id) {
+  pins.delete(id);
+  savePins();
+  if (id === convId && !sending) await openConversation(null);
+  await refreshChatLists();
+}
+async function restoreConv(id, { open = false } = {}) {
+  await api(`/api/conversations/${encodeURIComponent(id)}/restore`, { method: 'POST', body: {} });
+  await refreshChatLists();
+  if (open) { show('chat'); await openConversation(id); }
+}
+async function archiveConv(id, title = 'Chat') {
+  try {
+    await api(`/api/conversations/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    await afterRemoved(id);
+    toast(`Archived "${title}"`, 'ok', { label: 'Undo', run: () => restoreConv(id).catch((e) => toast(e.message, 'bad')) });
+  } catch (err) { toast(err.message, 'bad'); }
+}
+async function trashConv(id, title = 'Chat') {
+  try {
+    await api(`/api/conversations/${encodeURIComponent(id)}/trash`, { method: 'POST', body: {} });
+    await afterRemoved(id);
+    toast(`Deleted "${title}" (kept in trash)`, 'ok', { label: 'Undo', run: () => restoreConv(id).catch((e) => toast(e.message, 'bad')) });
+  } catch (err) { toast(err.message, 'bad'); }
+}
+async function renameConv(id, title) {
+  const next = await ask('Rename conversation', '', title);
+  if (!next?.trim()) return;
+  await api(`/api/conversations/${encodeURIComponent(id)}`, { method: 'PATCH', body: { title: next } });
+  if (id === convId) setHead(next.trim());
+  await refreshChatLists();
+}
+
+// ---- Chats manager (the Chat nav item) ----
+const chatsUi = { state: 'active', route: '', sort: 'recent', q: '', selected: new Set(), lists: { active: [], archived: [], trash: [] } };
+const STATE_LABEL = { active: 'Active', archived: 'Archived', trash: 'Trash' };
+function visibleChats() {
+  const q = chatsUi.q.trim().toLowerCase();
+  const list = chatsUi.lists[chatsUi.state].filter((c) => (!chatsUi.route || c.taskType === chatsUi.route) && (!q || `${c.title} ${c.preview ?? ''}`.toLowerCase().includes(q)));
+  const by = { recent: (a, b) => b.updated - a.updated, oldest: (a, b) => a.updated - b.updated, title: (a, b) => a.title.localeCompare(b.title), size: (a, b) => b.count - a.count };
+  return list.sort(by[chatsUi.sort]);
+}
+async function loadChats() {
+  const [active, archived, trash] = await Promise.all(['active', 'archived', 'trash'].map((st) => api(`/api/conversations?state=${st}`).then((r) => r.conversations)));
+  chatsUi.lists = { active, archived, trash };
+  convs = active;
+  const ids = new Set(chatsUi.lists[chatsUi.state].map((c) => c.id));
+  for (const id of chatsUi.selected) if (!ids.has(id)) chatsUi.selected.delete(id);
+  const routes = [...new Set(Object.values(chatsUi.lists).flat().map((c) => c.taskType).filter(Boolean))].sort();
+  const sel = $('#chats-route');
+  sel.replaceChildren(h('option', { value: '' }, 'All'), ...routes.map((r) => h('option', { value: r }, r)));
+  sel.value = routes.includes(chatsUi.route) ? chatsUi.route : '';
+  chatsUi.route = sel.value;
+  renderChats();
+  renderConversations();
+}
+function renderChats() {
+  const st = chatsUi.state;
+  $('#chats-state').replaceChildren(...Object.keys(STATE_LABEL).map((k) => h('button', { type: 'button', class: st === k ? 'on' : '', onclick: () => { chatsUi.state = k; chatsUi.selected.clear(); renderChats(); } }, STATE_LABEL[k], h('span', { class: 'cnt' }, String(chatsUi.lists[k].length)))));
+  const rows = visibleChats();
+  const allOn = rows.length && rows.every((c) => chatsUi.selected.has(c.id));
+  const bulk = $('#chats-bulk');
+  const count = chatsUi.selected.size;
+  bulk.hidden = !count;
+  if (count) {
+    const each = async (path, method, done) => {
+      try {
+        for (const id of [...chatsUi.selected]) await api(path(id), { method, body: method === 'POST' ? {} : undefined });
+        toast(done, 'ok');
+      } catch (e) { toast(e.message, 'bad'); }
+      chatsUi.selected.clear();
+      await refreshChatLists();
+    };
+    const base = (id) => `/api/conversations/${encodeURIComponent(id)}`;
+    bulk.replaceChildren(h('b', {}, `${count} selected`), h('span', { class: 'spacer' }),
+      st !== 'active' ? h('button', { class: 'sm', onclick: () => each((id) => `${base(id)}/restore`, 'POST', `Restored ${count}`) }, 'Restore') : null,
+      st === 'active' ? h('button', { class: 'sm', onclick: () => each(base, 'DELETE', `Archived ${count}`) }, 'Archive') : null,
+      st !== 'trash' ? h('button', { class: 'sm danger', onclick: () => { if (confirm(`Delete ${count} chat${count > 1 ? 's' : ''}? They move to the trash and can be restored from there.`)) each((id) => `${base(id)}/trash`, 'POST', `Deleted ${count} (kept in trash)`); } }, 'Delete') : null,
+      h('button', { class: 'ghost sm', onclick: () => { chatsUi.selected.clear(); renderChats(); } }, 'Clear'));
+  }
+  $('#chats-note').textContent = st === 'trash' ? 'Deleted chats stay in data/conversations/trash until you remove them by hand. Restore brings one back.' : st === 'archived' ? 'Archived chats are kept in data/conversations/archive. Opening one restores it.' : '';
+  const table = $('#chats-table');
+  if (!rows.length) {
+    table.replaceChildren(h('div', { class: 'panel muted' }, chatsUi.q || chatsUi.route ? 'No chats match.' : st === 'active' ? 'No conversations yet. Start one with New chat.' : `Nothing in ${STATE_LABEL[st].toLowerCase()}.`));
+    return;
+  }
+  const open = (c) => { if (st === 'active') { show('chat'); openConversation(c.id); } else restoreConv(c.id, { open: true }).catch((e) => toast(e.message, 'bad')); };
+  const act = (label, fn, cls = 'ghost sm') => h('button', { type: 'button', class: cls, onclick: (e) => { e.stopPropagation(); fn(); } }, label);
+  table.replaceChildren(h('table', { class: 'chat-table' },
+    h('thead', {}, h('tr', {},
+      h('th', { class: 'sel' }, h('input', { type: 'checkbox', checked: allOn ? true : null, 'aria-label': 'Select all', onchange: (e) => { for (const c of rows) { if (e.target.checked) chatsUi.selected.add(c.id); else chatsUi.selected.delete(c.id); } renderChats(); } })),
+      h('th', {}, 'Chat'), h('th', {}, 'Route'), h('th', { class: 'num' }, 'Msgs'), h('th', {}, 'Updated'), h('th', {}, ''))),
+    h('tbody', {}, rows.map((c) => h('tr', { class: 'row' },
+      h('td', { class: 'sel' }, h('input', { type: 'checkbox', checked: chatsUi.selected.has(c.id) ? true : null, 'aria-label': `Select ${c.title}`, onchange: (e) => { if (e.target.checked) chatsUi.selected.add(c.id); else chatsUi.selected.delete(c.id); renderChats(); } })),
+      h('td', {}, h('div', { class: 'title', tabindex: '0', role: 'link', title: st === 'active' ? 'Open this chat' : 'Restore and open this chat', onclick: () => open(c), onkeydown: (e) => e.key === 'Enter' && open(c) }, (pins.has(c.id) ? '● ' : '') + c.title), c.preview ? h('div', { class: 'prev' }, c.preview) : null),
+      h('td', {}, c.taskType ? h('span', { class: 'pill' }, c.taskType) : '', c.project ? h('span', { class: 'muted' }, ` ${c.project}`) : ''),
+      h('td', { class: 'num' }, String(c.count)),
+      h('td', { class: 'muted' }, when(c.updated)),
+      h('td', {}, h('div', { class: 'rowacts' },
+        st === 'active' ? act('Open', () => open(c)) : act('Restore', () => restoreConv(c.id).then(() => toast('Restored', 'ok')).catch((e) => toast(e.message, 'bad'))),
+        st === 'active' ? act('Rename', () => renameConv(c.id, c.title).catch((e) => toast(e.message, 'bad'))) : null,
+        st === 'active' ? act('Archive', () => archiveConv(c.id, c.title)) : null,
+        st !== 'trash' ? act('Delete', () => trashConv(c.id, c.title), 'ghost sm danger') : null)))))));
+}
+$('#chats-search').addEventListener('input', (e) => { chatsUi.q = e.target.value; renderChats(); });
+$('#chats-route').addEventListener('change', (e) => { chatsUi.route = e.target.value; renderChats(); });
+$('#chats-sort').addEventListener('change', (e) => { chatsUi.sort = e.target.value; renderChats(); });
+$('#chats-new').addEventListener('click', () => { show('chat'); openConversation(null); });
+loaders.chats = loadChats;
 
 // ---- Image attachments ----
 let pending = [];
@@ -1514,19 +1642,88 @@ $('#collapse').addEventListener('click', toggleSidebar);
 $('#menu').addEventListener('click', toggleSidebar);
 $('#scrim').addEventListener('click', toggleSidebar);
 
+// ---- Resizable sidebar ----
+(() => {
+  const handle = $('#side-resize');
+  const setW = (w, save) => {
+    ui.sideW = Math.max(SIDE_MIN, Math.min(SIDE_MAX, Math.round(w)));
+    applySideWidth();
+    if (save) saveUi();
+  };
+  handle.addEventListener('pointerdown', (e) => {
+    if (ui.collapsed) return;
+    e.preventDefault();
+    handle.setPointerCapture(e.pointerId);
+    $('#app').classList.add('resizing');
+    const left = $('#sidebar').getBoundingClientRect().left;
+    const move = (ev) => setW(ev.clientX - left, false);
+    const up = () => {
+      handle.removeEventListener('pointermove', move);
+      handle.removeEventListener('pointerup', up);
+      handle.removeEventListener('pointercancel', up);
+      $('#app').classList.remove('resizing');
+      saveUi();
+    };
+    handle.addEventListener('pointermove', move);
+    handle.addEventListener('pointerup', up);
+    handle.addEventListener('pointercancel', up);
+  });
+  handle.addEventListener('dblclick', () => { ui.sideW = 0; applySideWidth(); saveUi(); toast('Sidebar width reset', 'ok'); });
+  handle.addEventListener('keydown', (e) => {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    e.preventDefault();
+    setW($('#sidebar').getBoundingClientRect().width + (e.key === 'ArrowRight' ? 16 : -16), true);
+  });
+})();
+
+// ---- Top-right controls ----
+$('#top-new').addEventListener('click', () => { show('chat'); openConversation(null); });
+$('#top-search').addEventListener('click', () => openPalette());
+$('#top-theme').addEventListener('click', () => cycleTheme());
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', paintThemeButton);
+function closeUserMenu() {
+  $('#user-menu').hidden = true;
+  $('#who').setAttribute('aria-expanded', 'false');
+}
+function openUserMenu() {
+  const isAdmin = whoami?.scopes.includes('admin');
+  const go = (tab) => () => { closeUserMenu(); show(tab); };
+  const item = (label, fn) => h('button', { type: 'button', role: 'menuitem', onclick: fn }, label);
+  $('#user-menu').replaceChildren(
+    h('div', { class: 'mh' }, h('strong', {}, whoami?.name ?? 'Unknown'), h('small', {}, `Access: ${(whoami?.scopes ?? []).join(', ') || 'none'}`)),
+    item('Settings', go('settings')),
+    isAdmin ? item('Devices and tokens', go('devices')) : null,
+    isAdmin ? item('Connections', go('connections')) : null,
+    item('Keyboard shortcuts', go('settings')),
+    h('div', { class: 'msep' }),
+    item('Enter a different token…', async () => { closeUserMenu(); await askToken(); whoami = await api('/api/whoami').catch(() => null); applyFeatures(); toast('Token updated', 'ok'); }),
+    item('Forget saved token', () => { closeUserMenu(); $('#forget-token').click(); }),
+    item('Reload settings from the service', async () => { closeUserMenu(); try { await loadConfig(); applyFeatures(); await loadConversations(); toast('Reloaded', 'ok'); } catch (e) { toast(e.message, 'bad'); } }),
+  );
+  $('#user-menu').hidden = false;
+  $('#who').setAttribute('aria-expanded', 'true');
+  $('#user-menu button')?.focus();
+}
+$('#who').addEventListener('click', (e) => { e.stopPropagation(); if ($('#user-menu').hidden) openUserMenu(); else closeUserMenu(); });
+document.addEventListener('click', (e) => { if (!$('#user-menu').hidden && !e.target.closest('.menu-wrap')) closeUserMenu(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#user-menu').hidden) { closeUserMenu(); $('#who').focus(); } });
+
 // ---- Command palette ----
 let palIdx = 0;
 let palItems = [];
 function paletteCommands(q) {
   const items = [];
   for (const t of TABS) {
-    const el = $(`.nav-item[data-tab="${t.id}"]`);
-    if (el && !el.hidden) items.push({ group: 'Go to', label: t.label, hint: SUBS[t.id], run: () => show(t.id) });
+    const el = $(`.nav-item[data-nav="${t.id}"]`);
+    if (el && !el.hidden) items.push({ group: 'Go to', label: t.id === 'chat' ? 'Chat (current conversation)' : t.label, hint: SUBS[t.id], run: () => show(t.id) });
   }
+  items.push({ group: 'Go to', label: 'All chats', hint: SUBS.chats, run: () => show('chats') });
   items.push({ group: 'Go to', label: 'Settings', hint: SUBS.settings, run: () => show('settings') });
   items.push(
     { group: 'Actions', label: 'New chat', hint: 'Ctrl+Shift+O', run: () => { show('chat'); openConversation(null); } },
     { group: 'Actions', label: 'Toggle sidebar', hint: 'Ctrl+B', run: toggleSidebar },
+    { group: 'Actions', label: 'Reset sidebar width', hint: '', run: () => { ui.sideW = 0; applySideWidth(); saveUi(); } },
+    ...(convId ? [{ group: 'Actions', label: 'Archive this chat', hint: '', run: () => archiveConv(convId, $('#conv-title').textContent) }, { group: 'Actions', label: 'Delete this chat', hint: 'kept in trash', run: () => trashConv(convId, $('#conv-title').textContent) }] : []),
     { group: 'Actions', label: 'Cycle theme', hint: ui.theme, run: cycleTheme },
     { group: 'Actions', label: 'Check service status now', hint: '', run: () => { show('status'); loadStatus(true).catch((e) => toast(e.message, 'bad')); } },
   );
@@ -1579,7 +1776,7 @@ document.addEventListener('keydown', (e) => {
   else if (mod && e.key.toLowerCase() === 'b') { e.preventDefault(); toggleSidebar(); }
   else if (mod && e.shiftKey && e.key.toLowerCase() === 'o') { e.preventDefault(); show('chat'); openConversation(null); }
   else if (e.altKey && /^[1-9]$/.test(e.key)) {
-    const visible = TABS.filter((t) => !$(`.nav-item[data-tab="${t.id}"]`)?.hidden);
+    const visible = TABS.filter((t) => !$(`.nav-item[data-nav="${t.id}"]`)?.hidden);
     const t = visible[Number(e.key) - 1];
     if (t) { e.preventDefault(); show(t.id); }
   }
