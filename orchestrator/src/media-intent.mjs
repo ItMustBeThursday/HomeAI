@@ -1,5 +1,5 @@
 // Explicit requests only: discussing models or writing a prompt is still text chat.
-const REQUEST = /^(?:(?:ok(?:ay)?|yes)[,!. ]+)?(?:(?:please|can you|could you|would you|will you|i want you to|i'd like you to)\s+)*(?:generate|make|create|render|draw|paint|compose|produce)\s+(?:me\s+)?(?:an?\s+|some\s+)?(?:(?:short|photorealistic|realistic|new|test|beautiful|instrumental|ambient|original|digital)\s+){0,3}(video|clip|movie|music|song|soundtrack|tune|image|picture|photo|painting|illustration|drawing)\b/i;
+const REQUEST = /^(?:(?:ok(?:ay)?|yes)[,!. ]+)?(?:(?:please|can you|could you|would you|will you|i want you to|i'd like you to)\s+)*(?:generate|make|create|render|draw|paint|compose|produce)\s+(?:me\s+)?(?:an?\s+|some\s+)?(?:(?!(?:for|about|of|to|in|with|from|that|which|the|plan|list|prompt|description|title|name|lyrics|playlist|idea|ideas|script|storyboard|review|critique)\b)[\w'-]+\s+){0,6}(video|clip|movie|music|song|soundtrack|tune|image|picture|photo|painting|illustration|drawing)\b/i;
 const MODES = { video:'video', clip:'video', movie:'video', music:'music', song:'music', soundtrack:'music', tune:'music', image:'image', picture:'image', photo:'image', painting:'image', illustration:'image', drawing:'image' };
 export function mediaIntent(prompt, config, previous) {
   const text = String(prompt ?? '').trim();
