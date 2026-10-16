@@ -20,7 +20,11 @@ export function validateSchedule(cfg) {
     if (timing.length !== 1) throw new Error(`Job "${job.name}" needs exactly one of dailyAt or everyMinutes`);
     if (job.dailyAt !== undefined && !HHMM.test(job.dailyAt)) throw new Error(`Job "${job.name}" dailyAt must be HH:MM`);
     if (job.everyMinutes !== undefined && !(Number.isInteger(job.everyMinutes) && job.everyMinutes >= 1)) throw new Error(`Job "${job.name}" everyMinutes must be a positive integer`);
-    if (!Array.isArray(job.command) || !job.command.length || job.command.some((c) => typeof c !== 'string' || !c)) throw new Error(`Job "${job.name}" command must be a non-empty array of strings`);
+    // A job either runs a command (argv array, no shell) or asks a model (prompt, optionally on an agent route in a project).
+    if ([job.command, job.prompt].filter((v) => v !== undefined).length !== 1) throw new Error(`Job "${job.name}" needs exactly one of command or prompt`);
+    if (job.command !== undefined && (!Array.isArray(job.command) || !job.command.length || job.command.some((c) => typeof c !== 'string' || !c))) throw new Error(`Job "${job.name}" command must be a non-empty array of strings`);
+    if (job.prompt !== undefined && (typeof job.prompt !== 'string' || !job.prompt.trim())) throw new Error(`Job "${job.name}" prompt must be a non-empty string`);
+    for (const k of ['taskType', 'project']) if (job[k] !== undefined && (typeof job[k] !== 'string' || !job[k])) throw new Error(`Job "${job.name}" ${k} must be a non-empty string`);
     if (job.enabled !== undefined && typeof job.enabled !== 'boolean') throw new Error(`Job "${job.name}" enabled must be a boolean`);
   }
   return cfg;
@@ -38,7 +42,8 @@ export function isDue(job, last, nowMs) {
 const clip = (s) => s.trim().split(/\r?\n/).slice(-5).join(' | ').slice(0, 500);
 
 // record(entry) persists a run; lastRuns seeds state after a restart ({ jobName: ms }).
-export function createScheduler({ config, cwd, record, lastRuns = {}, now = Date.now, spawnImpl = spawn, timeoutMs = 600_000, tickMs = 30_000, setTimer = setInterval, clearTimer = clearInterval } = {}) {
+// runPrompt(job) → { ok, text?, error? } handles prompt jobs (wired to the orchestrator in main.mjs).
+export function createScheduler({ config, cwd, record, runPrompt, lastRuns = {}, now = Date.now, spawnImpl = spawn, timeoutMs = 600_000, tickMs = 30_000, setTimer = setInterval, clearTimer = clearInterval } = {}) {
   validateSchedule(config);
   const last = { ...lastRuns };
   const running = new Set();
@@ -52,9 +57,15 @@ export function createScheduler({ config, cwd, record, lastRuns = {}, now = Date
     last[job.name] = ts;
     let entry;
     try {
-      const [cmd, ...args] = job.command;
-      const { code, stdout, stderr } = await collect(spawnImpl, cmd, args, { timeoutMs, cwd });
-      entry = { job: job.name, ts, ok: code === 0, code, output: clip(code === 0 ? stdout : stderr || stdout) };
+      if (job.prompt !== undefined) {
+        if (!runPrompt) throw new Error('Prompt jobs are not enabled');
+        const r = await runPrompt(job);
+        entry = { job: job.name, ts, ok: !!r.ok, code: r.ok ? 0 : 1, output: clip(String(r.ok ? r.text ?? '' : r.error ?? 'failed')) };
+      } else {
+        const [cmd, ...args] = job.command;
+        const { code, stdout, stderr } = await collect(spawnImpl, cmd, args, { timeoutMs, cwd });
+        entry = { job: job.name, ts, ok: code === 0, code, output: clip(code === 0 ? stdout : stderr || stdout) };
+      }
     } catch (err) {
       entry = { job: job.name, ts, ok: false, code: null, output: err.message };
     } finally {

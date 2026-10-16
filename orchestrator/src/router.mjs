@@ -12,6 +12,7 @@ export function validateRoutes(config) {
     if (!isObj(c)) throw new Error(`Connector "${name}" must be an object`);
     if (!KINDS.has(c.kind)) throw new Error(`Connector "${name}" has unknown kind "${c.kind}"`);
     if (typeof c.model !== 'string' || !c.model) throw new Error(`Connector "${name}" needs a model string`);
+    if (c.vision !== undefined && typeof c.vision !== 'boolean') throw new Error(`Connector "${name}" vision must be a boolean`);
   }
   if (!isObj(routes) || Object.keys(routes).length === 0) throw new Error('config.routes must be a non-empty object');
   for (const [type, r] of Object.entries(routes)) {
@@ -22,6 +23,9 @@ export function validateRoutes(config) {
     }
     if (r.maxTurns !== undefined && !(Number.isInteger(r.maxTurns) && r.maxTurns >= 1)) throw new Error(`Route "${type}" maxTurns must be a positive integer`);
     if (r.tools !== undefined && !(Array.isArray(r.tools) && r.tools.every((t) => typeof t === 'string' && t))) throw new Error(`Route "${type}" tools must be an array of strings`);
+    if (r.agent !== undefined && typeof r.agent !== 'boolean') throw new Error(`Route "${type}" agent must be a boolean`);
+    // memory: true = core notes plus relevant ones; an array limits it to notes with those tags.
+    if (r.memory !== undefined && !(typeof r.memory === 'boolean' || (Array.isArray(r.memory) && r.memory.every((t) => typeof t === 'string' && t)))) throw new Error(`Route "${type}" memory must be a boolean or an array of tags`);
   }
   if (typeof config.default !== 'string' || !Object.hasOwn(routes, config.default)) throw new Error(`config.default must name an existing route`);
   return config;
@@ -31,7 +35,11 @@ export function resolveChain(config, taskType) {
   const route = Object.hasOwn(config.routes, taskType) ? config.routes[taskType] : config.routes[config.default];
   return route.chain.map((name) => {
     const c = config.connectors[name];
-    return { connector: name, kind: c.kind, model: c.model, maxTurns: route.maxTurns ?? 1, tools: [...(route.tools ?? [])] };
+    return {
+      connector: name, kind: c.kind, model: c.model, maxTurns: route.maxTurns ?? 1, tools: [...(route.tools ?? [])],
+      ...(c.vision ? { vision: true } : {}),
+      ...(route.agent ? { agent: true } : {}),
+    };
   });
 }
 

@@ -5,6 +5,9 @@
       "claude-sonnet": { "tokens": 2000000, "calls": 150 },
       "claude-opus": { "tokens": 1000000, "calls": 40 },
       "codex": { "tokens": 2000000, "calls": 150 }
+    },
+    "perTaskType": {
+      "agent": { "calls": 40 }
     }
   }
 }

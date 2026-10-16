@@ -8,19 +8,71 @@ const need = (v, name) => {
 const num = (v) => (Number.isFinite(v) ? v : 0);
 
 // stdinPrompt: leave the prompt out of argv; the caller pipes it on stdin (no command-line length/quoting limits).
-export function buildClaudeArgs({ prompt, model, systemPrompt, tools = [], maxTurns = 1, stdinPrompt = false } = {}) {
-  if (!stdinPrompt) need(prompt, 'prompt');
+// stream: emit stream-json events (text deltas, tool use) instead of one JSON blob.
+// streamInput: the prompt is stream-json on stdin (needed for image attachments); implies stream.
+// allowedTools/permissionMode/addDirs: agent mode, where Claude may run tools in its working directory.
+export function buildClaudeArgs({ prompt, model, systemPrompt, tools = [], maxTurns = 1, stdinPrompt = false, stream = false, streamInput = false, allowedTools, permissionMode, addDirs = [] } = {}) {
+  if (!stdinPrompt && !streamInput) need(prompt, 'prompt');
   need(model, 'model');
   if (!Array.isArray(tools)) throw new Error('tools must be an array');
   if (!Number.isInteger(maxTurns) || maxTurns < 1) throw new Error('maxTurns must be a positive integer');
-  const args = stdinPrompt ? ['-p'] : ['-p', prompt];
-  args.push('--output-format', 'json', '--model', model);
+  const args = stdinPrompt || streamInput ? ['-p'] : ['-p', prompt];
+  if (streamInput) args.push('--input-format', 'stream-json');
+  if (stream || streamInput) args.push('--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--model', model);
+  else args.push('--output-format', 'json', '--model', model);
   if (systemPrompt !== undefined) {
     if (typeof systemPrompt !== 'string') throw new Error('systemPrompt must be a string');
     args.push('--system-prompt', systemPrompt);
   }
   args.push('--tools', tools.join(','), '--strict-mcp-config', '--no-session-persistence', '--max-turns', String(maxTurns));
+  if (allowedTools?.length) args.push('--allowedTools', allowedTools.join(','));
+  if (permissionMode) args.push('--permission-mode', permissionMode);
+  for (const d of addDirs) args.push('--add-dir', d);
   return args;
+}
+
+// stdin payload for streamInput: one user message holding any images, then the text.
+// images: [{ mediaType, data(base64) }]
+export function buildClaudeStreamInput({ prompt, images = [] }) {
+  need(prompt, 'prompt');
+  const content = images.map((i) => ({ type: 'image', source: { type: 'base64', media_type: i.mediaType, data: i.data } }));
+  content.push({ type: 'text', text: prompt });
+  return JSON.stringify({ type: 'user', message: { role: 'user', content } }) + '\n';
+}
+
+const toolSummary = (input) => String(input?.command ?? input?.file_path ?? input?.pattern ?? input?.path ?? input?.url ?? '').slice(0, 200);
+
+// Stateful parser for `claude --output-format stream-json` lines.
+// Returns events: {type:'delta', text} | {type:'tool', name, summary} | {type:'result', ...parseClaudeJson fields}
+export function createClaudeStreamParser() {
+  let sawText = false;
+  return function parseLine(line) {
+    if (!line.trim()) return [];
+    let ev;
+    try {
+      ev = JSON.parse(line);
+    } catch {
+      return [];
+    }
+    if (ev === null || typeof ev !== 'object') return [];
+    if (ev.type === 'result') return [{ type: 'result', ...parseClaudeJson(line) }];
+    if (ev.type === 'stream_event') {
+      const e = ev.event ?? {};
+      if (e.type === 'content_block_start' && e.content_block?.type === 'text') {
+        // Separate text blocks (before and after tool calls) so they don't run together.
+        if (sawText) return [{ type: 'delta', text: '\n\n' }];
+      }
+      if (e.type === 'content_block_delta' && e.delta?.type === 'text_delta' && e.delta.text) {
+        sawText = true;
+        return [{ type: 'delta', text: e.delta.text }];
+      }
+      return [];
+    }
+    if (ev.type === 'assistant') {
+      return (ev.message?.content ?? []).filter((b) => b?.type === 'tool_use').map((b) => ({ type: 'tool', name: b.name, summary: toolSummary(b.input) }));
+    }
+    return [];
+  };
 }
 
 export function parseClaudeJson(stdout) {
@@ -42,11 +94,37 @@ export function parseClaudeJson(stdout) {
   };
 }
 
-export function buildCodexArgs({ prompt, model, sandbox = 'read-only', stdinPrompt = false } = {}) {
+// images: file paths (codex reads them itself). cwd/addDirs/network are for agent mode (sandbox workspace-write).
+export function buildCodexArgs({ prompt, model, sandbox = 'read-only', stdinPrompt = false, images = [], cwd, addDirs = [], network = false } = {}) {
   if (!stdinPrompt) need(prompt, 'prompt');
   need(model, 'model');
   if (!['read-only', 'workspace-write'].includes(sandbox)) throw new Error(`Unsupported codex sandbox "${sandbox}"`);
-  return ['exec', '--json', '--ephemeral', '--skip-git-repo-check', '-m', model, '-s', sandbox, stdinPrompt ? '-' : prompt];
+  const args = ['exec', '--json', '--ephemeral', '--skip-git-repo-check'];
+  if (cwd) args.push('-C', cwd);
+  for (const d of addDirs) args.push('--add-dir', d);
+  if (network) args.push('-c', 'sandbox_workspace_write.network_access=true');
+  for (const i of images) args.push('-i', i);
+  args.push('-m', model, '-s', sandbox, stdinPrompt ? '-' : prompt);
+  return args;
+}
+
+// One codex JSONL event → zero or more UI events. Codex sends whole messages, not token deltas.
+export function codexEvents(line) {
+  let ev;
+  try {
+    ev = JSON.parse(line);
+  } catch {
+    return [];
+  }
+  if (ev === null || typeof ev !== 'object') return [];
+  const item = ev.item ?? ev.msg;
+  if (!item) return [];
+  if (ev.type === 'item.completed' && item.type === 'agent_message' && typeof item.text === 'string') return [{ type: 'delta', text: item.text }];
+  if (ev.type === 'item.started' && item.type === 'command_execution') return [{ type: 'tool', name: 'shell', summary: String(item.command ?? '').slice(0, 200) }];
+  if (ev.type === 'item.completed' && item.type === 'file_change') {
+    return [{ type: 'tool', name: 'edit', summary: (item.changes ?? []).map((c) => c.path).filter(Boolean).join(', ').slice(0, 200) }];
+  }
+  return [];
 }
 
 // Accepts both current ({type:"item.completed", item:{type:"agent_message", text}}) and older
@@ -86,7 +164,8 @@ export function parseCodexJsonl(stdout) {
   return { text, inputTokens, outputTokens, costUsd: null, ok: !failed && text !== '' };
 }
 
-export function buildOllamaRequest({ model, prompt, system } = {}) {
+// images: base64 strings (vision models only).
+export function buildOllamaRequest({ model, prompt, system, images = [] } = {}) {
   need(model, 'model');
   need(prompt, 'prompt');
   const messages = [];
@@ -94,7 +173,7 @@ export function buildOllamaRequest({ model, prompt, system } = {}) {
     if (typeof system !== 'string') throw new Error('system must be a string');
     messages.push({ role: 'system', content: system });
   }
-  messages.push({ role: 'user', content: prompt });
+  messages.push(images.length ? { role: 'user', content: prompt, images } : { role: 'user', content: prompt });
   return { url: OLLAMA_URL, body: { model, stream: false, messages } };
 }
 

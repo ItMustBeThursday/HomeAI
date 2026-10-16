@@ -22,6 +22,7 @@ function h(tag, attrs = {}, ...kids) {
 let token = localStorage.getItem('homeai-token') || '';
 
 async function api(path, { method = 'GET', body } = {}) {
+  await bootstrapToken();
   const headers = {};
   if (token) headers.authorization = `Bearer ${token}`;
   if (body !== undefined) headers['content-type'] = 'application/json';
@@ -34,6 +35,47 @@ async function api(path, { method = 'GET', body } = {}) {
   }
   if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
   return data;
+}
+
+// On this PC the service hands the admin token to the WebUI; elsewhere it answers 403 and we fall back to asking.
+async function bootstrapToken() {
+  if (token) return;
+  try {
+    const r = await fetch('/api/bootstrap');
+    if (r.ok) token = (await r.json()).token || '';
+  } catch { /* ignore */ }
+}
+
+// POST that reads a server-sent-event stream. onEvent gets each event; resolves with the 'done' event.
+async function stream(path, body, onEvent, signal) {
+  await bootstrapToken();
+  const headers = { 'content-type': 'application/json' };
+  if (token) headers.authorization = `Bearer ${token}`;
+  const res = await fetch(path, { method: 'POST', headers, body: JSON.stringify({ ...body, stream: true }), signal });
+  if (res.status === 401) { await askToken(); return stream(path, body, onEvent, signal); }
+  if (!res.ok || !res.body) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  let buf = '';
+  let final = null;
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let i;
+    while ((i = buf.indexOf('\n\n')) >= 0) {
+      const frame = buf.slice(0, i);
+      buf = buf.slice(i + 2);
+      const line = frame.split('\n').find((l) => l.startsWith('data: '));
+      if (!line) continue;
+      const ev = JSON.parse(line.slice(6));
+      if (ev.type === 'error') throw new Error(ev.error);
+      if (ev.type === 'done') final = ev;
+      onEvent?.(ev);
+    }
+  }
+  if (!final) throw new Error('Stream ended without a result');
+  return final;
 }
 
 function askToken() {
@@ -166,6 +208,43 @@ $('#archive-chat').addEventListener('click', async () => {
   openConversation(null);
 });
 
+// ---- Image attachments ----
+let pending = []; // [{ name, mediaType, data, url }]
+const IMG_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
+
+function renderAttachments() {
+  const strip = $('#attach-strip');
+  strip.hidden = !pending.length;
+  strip.replaceChildren(...pending.map((p, i) => h('span', { class: 'thumb' }, h('img', { src: p.url, alt: p.name }), h('button', { type: 'button', class: 'ghost', title: 'Remove', onclick: () => { URL.revokeObjectURL(p.url); pending.splice(i, 1); renderAttachments(); } }, '×'))));
+}
+
+async function addFiles(files) {
+  for (const f of files) {
+    if (!IMG_TYPES.includes(f.type)) { $('#busy').textContent = `${f.name}: not an image type I can send`; continue; }
+    if (pending.length >= 4) { $('#busy').textContent = 'At most 4 images per message'; break; }
+    const data = await new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(String(r.result).split(',')[1]);
+      r.onerror = reject;
+      r.readAsDataURL(f);
+    });
+    pending.push({ name: f.name || 'pasted-image', mediaType: f.type, data, url: URL.createObjectURL(f) });
+  }
+  renderAttachments();
+}
+$('#attach').addEventListener('click', () => $('#file').click());
+$('#file').addEventListener('change', async (e) => { await addFiles([...e.target.files]); e.target.value = ''; });
+$('#prompt').addEventListener('paste', (e) => {
+  const files = [...(e.clipboardData?.files ?? [])].filter((f) => f.type.startsWith('image/'));
+  if (files.length) { e.preventDefault(); addFiles(files); }
+});
+$('#composer').addEventListener('dragover', (e) => e.preventDefault());
+$('#composer').addEventListener('drop', (e) => { e.preventDefault(); addFiles([...e.dataTransfer.files]); });
+
+// ---- Streaming send ----
+let chatAbort = null;
+$('#stop').addEventListener('click', () => chatAbort?.abort());
+
 $('#composer').addEventListener('submit', async (e) => {
   e.preventDefault();
   if (sending) return;
@@ -173,36 +252,98 @@ $('#composer').addEventListener('submit', async (e) => {
   if (!text) return;
   sending = true;
   $('#send').disabled = true;
-  addMessage({ role: 'user', text });
+  $('#stop').hidden = false;
+  const images = pending.map(({ name, mediaType, data }) => ({ name, mediaType, data }));
+  addMessage({ role: 'user', text: images.length ? `${text}\n[${images.length} image${images.length > 1 ? 's' : ''} attached]` : text });
   $('#prompt').value = '';
+  // Live bubble: text arrives as deltas, tool use and fallbacks show as status lines.
+  const thread = $('#thread');
+  const live = h('div', { class: 'msg-bot live' });
+  const body = h('p', {}, '');
+  const status = h('div', { class: 'meta' }, 'Starting…');
+  live.append(body, status);
+  thread.append(live);
+  let acc = '';
   const started = Date.now();
-  const tick = setInterval(() => ($('#busy').textContent = `Waiting for a model… ${secs(Date.now() - started)}`), 250);
+  const tick = setInterval(() => ($('#busy').textContent = secs(Date.now() - started)), 250);
+  chatAbort = new AbortController();
   try {
-    const r = await api('/api/chat', { method: 'POST', body: { conversationId: convId ?? undefined, prompt: text, taskType: $('#route').value, connector: $('#pin').value || undefined } });
+    const r = await stream('/api/chat', {
+      conversationId: convId ?? undefined, prompt: text, taskType: $('#route').value, connector: $('#pin').value || undefined,
+      images: images.length ? images : undefined, project: $('#project-label').hidden ? undefined : $('#project').value || undefined,
+    }, (ev) => {
+      if (ev.type === 'attempt') { acc = ''; body.textContent = ''; status.textContent = `${ev.connector} · ${ev.model}…`; }
+      else if (ev.type === 'delta') { acc += ev.text; body.textContent = acc; }
+      else if (ev.type === 'tool') status.textContent = `${ev.connector ?? ''} ${ev.name}: ${ev.summary ?? ''}`.trim();
+      else if (ev.type === 'attempt-failed') status.textContent = `${ev.connector} failed (${ev.error}); trying next…`;
+      thread.scrollTop = thread.scrollHeight;
+    }, chatAbort.signal);
+    live.remove();
     const isNew = !convId;
     convId = r.conversation.id;
     if (isNew) $('#conv-title').textContent = r.conversation.title;
     $('#rename-chat').hidden = $('#archive-chat').hidden = false;
     addMessage({ role: 'assistant', ...r.reply });
+    pending = [];
+    renderAttachments();
     loadConversations();
   } catch (err) {
-    addMessage({ role: 'assistant', error: err.message });
+    live.remove();
+    const stopped = err.name === 'AbortError';
+    addMessage({ role: 'assistant', error: stopped ? 'Stopped' : err.message, ...(stopped && acc ? { text: acc } : {}) });
     $('#prompt').value = text;
   } finally {
     clearInterval(tick);
+    chatAbort = null;
     $('#busy').textContent = '';
     $('#send').disabled = false;
+    $('#stop').hidden = true;
     sending = false;
   }
 });
+
+// Agent route needs a project folder to work in.
+function syncProjectPicker() {
+  const agent = !!config?.routes[$('#route').value]?.agent;
+  $('#project-label').hidden = !agent || !config?.features.shell;
+}
+$('#route').addEventListener('change', syncProjectPicker);
 $('#prompt').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) $('#composer').requestSubmit();
 });
 
+let projects = [];
+async function loadProjects() {
+  if (!config?.features.shell) return;
+  const r = await api('/api/projects').catch(() => null);
+  if (!r) return;
+  projects = r.projects;
+  const opts = () => projects.map((p) => h('option', { value: p.name }, p.name === r.default ? `${p.name} (default)` : p.name));
+  for (const id of ['#project', '#term-project']) {
+    const el = $(id);
+    const prev = el.value;
+    el.replaceChildren(...opts());
+    el.value = prev && projects.some((p) => p.name === prev) ? prev : r.default;
+  }
+}
+
 loaders.chat = async () => {
   await loadConfig();
-  await loadConversations();
+  applyFeatures();
+  await Promise.all([loadConversations(), loadProjects()]);
+  syncProjectPicker();
 };
+
+// Hide tabs/controls for features the service has not enabled, or that this token cannot use.
+let whoami = null;
+function applyFeatures() {
+  const f = config.features;
+  const isAdmin = whoami?.scopes.includes('admin');
+  for (const el of document.querySelectorAll('[data-feature]')) {
+    const k = el.dataset.feature;
+    el.hidden = !f[k] || (['shell', 'devices'].includes(k) && !isAdmin);
+  }
+}
 
 // ---- Usage ----
 function totalsTable(rows, label) {
@@ -341,8 +482,178 @@ async function saveCfg(kind) {
 $('#save-routes').addEventListener('click', () => saveCfg('routes'));
 $('#save-budgets').addEventListener('click', () => saveCfg('budgets'));
 
+// ---- Terminal ----
+let termAbort = null;
+function runStreamed(path, body, out, stopBtn, runBtn) {
+  out.textContent = '';
+  termAbort = new AbortController();
+  stopBtn.hidden = false;
+  runBtn.disabled = true;
+  const started = Date.now();
+  return stream(path, body, (ev) => {
+    if (ev.type === 'stdout' || ev.type === 'stderr') {
+      out.append(ev.stream === 'stderr' || ev.type === 'stderr' ? h('span', { class: 'err' }, ev.text) : ev.text);
+      out.scrollTop = out.scrollHeight;
+    }
+  }, termAbort.signal)
+    .then((r) => out.append(h('span', { class: r.ok ? 'ok' : 'err' }, `\n[exit ${r.code}${r.timedOut ? ', timed out' : ''}${r.truncated ? ', output truncated' : ''} · ${secs(Date.now() - started)}]`)))
+    .catch((err) => out.append(h('span', { class: 'err' }, `\n[${err.name === 'AbortError' ? 'stopped' : err.message}]`)))
+    .finally(() => { termAbort = null; stopBtn.hidden = true; runBtn.disabled = false; });
+}
+$('#term-stop').addEventListener('click', () => termAbort?.abort());
+$('#term-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const command = $('#term-cmd').value.trim();
+  if (!command) return;
+  runStreamed('/api/exec', { command, project: $('#term-project').value, cwd: $('#term-cwd').value.trim() || undefined }, $('#term-out'), $('#term-stop'), $('#term-run'));
+});
+loaders.terminal = loadProjects;
+
+// ---- Projects & GitHub ----
+function gitBtn(p, action, label, extra) {
+  return h('button', { class: 'ghost', onclick: async (e) => {
+    let message;
+    if (action === 'sync') {
+      message = prompt('Commit message for the public GitHub repo (this publishes):');
+      if (!message?.trim()) return;
+    }
+    const btns = [...e.target.parentElement.querySelectorAll('button')];
+    btns.forEach((b) => (b.disabled = true));
+    const out = $('#proj-out');
+    const path = `/api/projects/${encodeURIComponent(p.name)}/${action === 'test' ? 'test' : 'git'}`;
+    const body = action === 'test' ? {} : { action, message };
+    try {
+      await runStreamed(path, body, out, h('button', { hidden: true }), h('button'));
+      out.prepend(h('span', { class: 'ok' }, `$ ${extra ?? action} (${p.name})\n`));
+    } finally { btns.forEach((b) => (b.disabled = false)); }
+  } }, label);
+}
+
+async function loadGithub() {
+  const msg = $('#gh-msg');
+  msg.textContent = 'Loading…';
+  try {
+    const [s, i] = await Promise.all([api('/api/github'), api('/api/github/issues?state=open')]);
+    msg.textContent = '';
+    $('#gh-repo').textContent = s.repo;
+    $('#gh-summary').replaceChildren(
+      h('p', {}, h('a', { href: s.url, target: '_blank', rel: 'noopener' }, s.url), ` · ${s.private ? 'private' : 'public'} · default branch ${s.defaultBranch} · ${s.openIssues} open`),
+      h('table', {}, h('tr', {}, h('th', {}, 'Commit'), h('th', {}, 'Message'), h('th', {}, 'When')), s.commits.map((c) => h('tr', {}, h('td', { class: 'mono' }, c.sha), h('td', {}, c.message), h('td', {}, when(c.date))))),
+      s.runs.length ? h('table', {}, h('tr', {}, h('th', {}, 'CI run'), h('th', {}, 'Branch'), h('th', {}, 'Result')), s.runs.map((r) => h('tr', {}, h('td', {}, h('a', { href: r.url, target: '_blank', rel: 'noopener' }, r.name)), h('td', {}, r.branch), h('td', {}, h('span', { class: `pill ${r.conclusion === 'success' ? 'ok' : r.conclusion ? 'bad' : 'warn'}` }, r.conclusion ?? r.status))))) : null);
+    $('#gh-issues').replaceChildren(i.issues.length
+      ? h('table', {}, i.issues.map((x) => h('tr', {}, h('td', {}, x.pullRequest ? 'PR' : 'Issue'), h('td', {}, h('a', { href: x.url, target: '_blank', rel: 'noopener' }, `#${x.number} ${x.title}`)), h('td', { class: 'muted' }, x.user))))
+      : h('p', { class: 'muted' }, 'Nothing open.'));
+  } catch (err) {
+    msg.textContent = err.message;
+  }
+}
+$('#gh-refresh').addEventListener('click', loadGithub);
+$('#gh-create').addEventListener('click', async () => {
+  const m = $('#gh-create-msg');
+  const title = $('#gh-title').value.trim();
+  if (!title) return;
+  if (!confirm(`Create a public GitHub issue titled "${title}"?`)) return;
+  m.className = 'msg';
+  m.textContent = 'Creating…';
+  try {
+    const r = await api('/api/github/issues', { method: 'POST', body: { title, body: $('#gh-body').value } });
+    m.className = 'msg ok';
+    m.textContent = `Created #${r.number}`;
+    $('#gh-title').value = $('#gh-body').value = '';
+    loadGithub();
+  } catch (err) {
+    m.className = 'msg bad';
+    m.textContent = err.message;
+  }
+});
+
+loaders.projects = async () => {
+  await loadProjects();
+  $('#projects-table').replaceChildren(h('table', {}, h('tr', {}, ['Project', 'Folder', 'Actions'].map((t) => h('th', {}, t))),
+    projects.map((p) => h('tr', {}, h('td', {}, h('strong', {}, p.name), h('div', { class: 'muted' }, p.description)), h('td', { class: 'mono' }, p.path),
+      h('td', {}, h('span', { class: 'row' },
+        p.canTest ? gitBtn(p, 'test', 'Run tests', 'tests') : null,
+        p.git ? ['status', 'log', 'diff'].map((a) => gitBtn(p, a, a, `git ${a}`)) : null,
+        p.canSync ? gitBtn(p, 'sync', 'Publish to GitHub', 'sync') : null))))));
+  loadGithub();
+};
+
+// ---- Memory ----
+let editing = null;
+async function loadMemory() {
+  const q = $('#mem-search').value.trim();
+  const { notes } = await api(`/api/memory${q ? `?q=${encodeURIComponent(q)}` : ''}`);
+  $('#mem-list').replaceChildren(notes.length
+    ? h('table', {}, h('tr', {}, ['Title', 'Note', 'Tags', ''].map((t) => h('th', {}, t))),
+      notes.map((x) => h('tr', {}, h('td', {}, h('strong', {}, x.title)), h('td', {}, x.text), h('td', { class: 'muted' }, x.tags.join(', ')),
+        h('td', {}, h('span', { class: 'row' },
+          h('button', { class: 'ghost', onclick: () => { editing = x.id; $('#mem-title').value = x.title; $('#mem-text').value = x.text; $('#mem-tags').value = x.tags.join(', '); $('#mem-cancel').hidden = false; $('#mem-title').focus(); } }, 'Edit'),
+          h('button', { class: 'ghost', onclick: async () => { if (!confirm(`Delete "${x.title}"? It moves to the memory trash.`)) return; await api(`/api/memory/${x.id}`, { method: 'DELETE' }); loadMemory(); } }, 'Delete'))))))
+    : h('p', { class: 'muted' }, 'No notes.'));
+}
+function resetMemForm() {
+  editing = null;
+  $('#mem-form').reset();
+  $('#mem-cancel').hidden = true;
+}
+$('#mem-cancel').addEventListener('click', resetMemForm);
+$('#mem-refresh').addEventListener('click', loadMemory);
+$('#mem-search').addEventListener('input', () => loadMemory());
+$('#mem-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const m = $('#mem-msg');
+  const body = { title: $('#mem-title').value, text: $('#mem-text').value, tags: $('#mem-tags').value.split(',').map((t) => t.trim()).filter(Boolean) };
+  try {
+    await (editing ? api(`/api/memory/${editing}`, { method: 'PATCH', body }) : api('/api/memory', { method: 'POST', body }));
+    m.className = 'msg ok';
+    m.textContent = 'Saved.';
+    resetMemForm();
+    loadMemory();
+  } catch (err) {
+    m.className = 'msg bad';
+    m.textContent = err.message;
+  }
+});
+loaders.memory = loadMemory;
+
+// ---- Devices ----
+async function loadDevices() {
+  $('#whoami').textContent = whoami ? `This browser is signed in as "${whoami.name}" (${whoami.scopes.join(', ')})` : '';
+  const { devices } = await api('/api/devices');
+  $('#dev-list').replaceChildren(devices.length
+    ? h('table', {}, h('tr', {}, ['Device', 'Access', 'Created', 'Last seen', ''].map((t) => h('th', {}, t))),
+      devices.map((d) => h('tr', {}, h('td', {}, d.name), h('td', {}, d.scopes.join(', ')), h('td', {}, when(d.created)), h('td', {}, d.lastSeen ? when(d.lastSeen) : 'never'),
+        h('td', {}, h('button', { class: 'ghost', onclick: async () => { if (!confirm(`Revoke "${d.name}"? Its token stops working immediately.`)) return; await api(`/api/devices/${d.id}`, { method: 'DELETE' }); loadDevices(); } }, 'Revoke')))))
+    : h('p', { class: 'muted' }, 'No extra devices yet.'));
+}
+$('#dev-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const m = $('#dev-msg');
+  const scopes = [...document.querySelectorAll('#dev-form input[name=scope]:checked')].map((x) => x.value);
+  try {
+    const r = await api('/api/devices', { method: 'POST', body: { name: $('#dev-name').value, scopes } });
+    m.className = 'msg ok';
+    m.textContent = 'Created.';
+    const box = $('#dev-token');
+    box.hidden = false;
+    box.replaceChildren(h('strong', {}, `Token for ${r.device.name} (shown once, copy it now):`), h('pre', { class: 'term' }, r.token));
+    $('#dev-name').value = '';
+    loadDevices();
+  } catch (err) {
+    m.className = 'msg bad';
+    m.textContent = err.message;
+  }
+});
+loaders.devices = loadDevices;
+
 // ---- Boot ----
 health();
 setInterval(health, 30_000);
-const start = location.hash.slice(1);
-show(loaders[start] || start === 'logan' ? start : 'chat');
+(async () => {
+  await bootstrapToken();
+  whoami = await api('/api/whoami').catch(() => null);
+  await loadConfig().catch(() => {});
+  if (config) applyFeatures();
+  const start = location.hash.slice(1);
+  show(loaders[start] || start === 'logan' ? start : 'chat');
+})();

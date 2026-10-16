@@ -20,7 +20,11 @@ test('returns first successful connector and records usage', async () => {
   assert.equal(r.ok, true);
   assert.equal(r.text, 'hi');
   assert.equal(r.connector, 'a');
-  assert.deepEqual(calls, [['a', { prompt: 'p', system: 's' }]]);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0][0], 'a');
+  assert.equal(calls[0][1].prompt, 'p');
+  assert.equal(calls[0][1].system, 's');
+  assert.deepEqual(calls[0][1].images, []);
   assert.equal(o.usage(0).total.calls, 1);
 });
 

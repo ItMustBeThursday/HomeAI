@@ -11,11 +11,15 @@
     <span class="brand">HomeAI</span>
     <nav id="tabs">
       <button data-tab="chat" class="active">Chat</button>
+      <button data-tab="terminal" data-feature="shell">Terminal</button>
+      <button data-tab="projects" data-feature="shell">Projects</button>
+      <button data-tab="memory" data-feature="memory">Memory</button>
       <button data-tab="usage">Usage</button>
       <button data-tab="history">History</button>
       <button data-tab="status">Status</button>
       <button data-tab="schedule">Schedule</button>
       <button data-tab="config">Config</button>
+      <button data-tab="devices" data-feature="devices">Devices</button>
       <button data-tab="logan">Logan</button>
     </nav>
     <span id="health" class="health" title="Service health">…</span>
@@ -36,16 +40,69 @@
         </div>
         <div id="thread" class="thread"><p class="empty">Ask anything. The route decides which model answers; you can pin one below.</p></div>
         <form id="composer">
-          <textarea id="prompt" rows="3" placeholder="Message… (Ctrl+Enter to send)" required></textarea>
+          <div id="attach-strip" class="attach-strip" hidden></div>
+          <textarea id="prompt" rows="3" placeholder="Message… (Ctrl+Enter to send; paste or drop images)" required></textarea>
           <div class="composer-row">
             <label>Route <select id="route"></select></label>
             <label>Model <select id="pin"><option value="">Auto (route chain)</option></select></label>
+            <label id="project-label" hidden>Project <select id="project"></select></label>
+            <button type="button" id="attach" class="ghost" data-feature="images" title="Attach images">Attach image</button>
+            <input type="file" id="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden>
             <span class="spacer"></span>
             <span id="busy" class="muted"></span>
+            <button type="button" id="stop" class="ghost" hidden>Stop</button>
             <button type="submit" class="primary" id="send">Send</button>
           </div>
         </form>
       </div>
+    </section>
+
+    <section id="tab-terminal" class="tab">
+      <p class="muted">Runs PowerShell on this PC as you, inside a registered project folder. Every command is logged to <code>data/exec.jsonl</code>. Anything mentioning OneDrive is refused.</p>
+      <div class="toolbar">
+        <label>Project <select id="term-project"></select></label>
+        <label>Folder <input id="term-cwd" placeholder="(project root)" size="18"></label>
+      </div>
+      <form id="term-form" class="row">
+        <input id="term-cmd" class="code grow" placeholder="Command, e.g. node --test" autocomplete="off" spellcheck="false" required>
+        <button class="primary" id="term-run">Run</button>
+        <button type="button" id="term-stop" class="ghost" hidden>Stop</button>
+      </form>
+      <pre id="term-out" class="term">Output appears here.</pre>
+    </section>
+
+    <section id="tab-projects" class="tab">
+      <div id="projects-table"></div>
+      <pre id="proj-out" class="term">Pick an action above. Test and git output appears here.</pre>
+      <h3>GitHub <small id="gh-repo"></small></h3>
+      <div class="toolbar"><button id="gh-refresh" class="ghost">Refresh</button><span id="gh-msg" class="muted"></span></div>
+      <div id="gh-summary"></div>
+      <div class="two-col">
+        <div><h3>Issues and pull requests</h3><div id="gh-issues"></div></div>
+        <div>
+          <h3>New issue <small>publishes publicly</small></h3>
+          <input id="gh-title" placeholder="Title" style="width:100%">
+          <textarea id="gh-body" rows="4" placeholder="Details" style="width:100%;margin-top:6px"></textarea>
+          <div class="row" style="margin-top:6px"><button id="gh-create" class="primary">Create issue</button><span id="gh-create-msg" class="msg"></span></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="tab-memory" class="tab">
+      <p class="muted">Durable facts and preferences. Routes with <code>"memory": true</code> see notes tagged <code>core</code> plus the notes that best match each prompt. Deleted notes move to <code>data/memory/trash</code>.</p>
+      <div class="toolbar"><input id="mem-search" placeholder="Search…" size="24"><button id="mem-refresh" class="ghost">Refresh</button></div>
+      <div id="mem-list"></div>
+      <h3>Add or edit a note</h3>
+      <form id="mem-form">
+        <input id="mem-title" placeholder="Title" style="width:100%" required>
+        <textarea id="mem-text" rows="4" placeholder="The fact or preference" style="width:100%;margin-top:6px" required></textarea>
+        <div class="row" style="margin-top:6px">
+          <input id="mem-tags" placeholder="tags, comma separated (core = always included)" size="40">
+          <button class="primary" id="mem-save">Save note</button>
+          <button type="button" class="ghost" id="mem-cancel" hidden>Cancel edit</button>
+          <span id="mem-msg" class="msg"></span>
+        </div>
+      </form>
     </section>
 
     <section id="tab-usage" class="tab">
@@ -74,7 +131,7 @@
     </section>
 
     <section id="tab-schedule" class="tab">
-      <p class="muted">Timed jobs run by the service itself (replaces OpenClaw automations). Jobs are defined in <code>config/schedule.json</code>; set <code>"enabled": true</code> there to turn the scheduler on. <b>Run now</b> works either way, so you can test a job.</p>
+      <p class="muted">Timed jobs run by the service itself (replaces OpenClaw automations). A job runs either a <code>command</code> or a model <code>prompt</code> (optionally on the <code>agent</code> route in a <code>project</code>). Jobs are defined in <code>config/schedule.json</code>; set <code>"enabled": true</code> there to turn the scheduler on. <b>Run now</b> works either way, so you can test a job.</p>
       <div id="schedule-state" class="toolbar"></div>
       <div id="schedule-jobs"></div>
       <h3>Request queue</h3>
@@ -99,11 +156,30 @@
       </div>
     </section>
 
+    <section id="tab-devices" class="tab">
+      <p class="muted">The service always requires a token. This PC's WebUI picks up the admin token automatically. Other devices (phones, Logan displays, companion apps) get their own limited token here: <b>read</b> = dashboards, <b>chat</b> = read + models (never shell or agents), <b>logan</b> = the Logan feed only, <b>admin</b> = everything. Tokens are shown once and stored only as hashes.</p>
+      <div id="whoami" class="toolbar"></div>
+      <div id="dev-list"></div>
+      <h3>Add a device</h3>
+      <form id="dev-form" class="row">
+        <input id="dev-name" placeholder="Name, e.g. Adam's phone" size="26" required>
+        <label><input type="checkbox" name="scope" value="read" checked> read</label>
+        <label><input type="checkbox" name="scope" value="chat"> chat</label>
+        <label><input type="checkbox" name="scope" value="logan"> logan</label>
+        <label><input type="checkbox" name="scope" value="admin"> admin</label>
+        <button class="primary">Create token</button>
+        <span id="dev-msg" class="msg"></span>
+      </form>
+      <div id="dev-token" class="token-box" hidden></div>
+      <h3>Reaching the service from other devices</h3>
+      <p class="muted">By default it listens on this PC only. Edit <code>config/network.json</code> and restart: set <code>host</code> to <code>0.0.0.0</code> (or your Tailscale IP), add names to <code>allowedHosts</code> (e.g. your <code>*.ts.net</code> name) or set <code>allowPrivateIPs</code> for LAN/Tailscale addresses. Shell, agents, config and device management still only work from this PC unless <code>remoteAdmin</code> is true. Easiest private HTTPS: <code>tailscale serve --bg 18850</code>, then add the Tailscale name to <code>allowedHosts</code>. See README, "Network access".</p>
+    </section>
+
     <section id="tab-logan" class="tab">
       <div class="placeholder">
         <h2>Logan menus</h2>
         <p>Coming in Phase 3: the approved menu catalog, version history with rollback, the rules check (ratings, subscribed services, nothing paid), the device feed, and Logan's choice log.</p>
-        <p class="muted">Switch presses stay deterministic. Models only help draft menus, which you approve before they go live.</p>
+        <p class="muted">Switch presses stay deterministic. Models only help draft menus, which you approve before they go live. Devices already can get a <b>logan</b>-scope token (Devices tab).</p>
       </div>
     </section>
   </main>
@@ -111,7 +187,7 @@
   <dialog id="token-dialog">
     <form method="dialog" id="token-form">
       <h3>Access token</h3>
-      <p class="muted">This service requires the token set in <code>HOMEAI_ORCH_TOKEN</code>. It is stored only in this browser.</p>
+      <p class="muted">This service requires a token. On the PC running it, it is in <code>data/token.txt</code>; on other devices use a token from the Devices tab. It is stored only in this browser.</p>
       <input id="token-input" type="password" autocomplete="off" required>
       <div class="row"><span class="spacer"></span><button class="primary">Save</button></div>
     </form>

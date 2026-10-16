@@ -43,7 +43,7 @@ export function buildPrompt(messages, prompt, maxChars = 12_000) {
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i];
     if (!m.text) continue;
-    const line = `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.text}`;
+    const line = `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.text}${m.images?.length ? ` [attached ${m.images.length} image(s)]` : ''}`;
     if (used + line.length > maxChars) break;
     used += line.length;
     turns.unshift(line);
@@ -77,9 +77,9 @@ export function createConversationStore(dir, { now = Date.now, newId = randomUUI
   };
   return {
     get: read,
-    create({ title = 'New chat', taskType } = {}) {
+    create({ title = 'New chat', taskType, project } = {}) {
       const t = now();
-      return write({ id: newId(), title: clip(String(title), 80), taskType: taskType || undefined, created: t, updated: t, messages: [] });
+      return write({ id: newId(), title: clip(String(title), 80), taskType: taskType || undefined, project: project || undefined, created: t, updated: t, messages: [] });
     },
     append(id, ...messages) {
       const conv = read(id);

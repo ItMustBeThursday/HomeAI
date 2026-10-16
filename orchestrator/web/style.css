@@ -97,3 +97,16 @@ dialog input { width: 100%; margin: 8px 0; }
   .two-col { grid-template-columns: 1fr; }
   .msg-user, .msg-bot { max-width: 100%; }
 }
+
+.attach-strip { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+.thumb { position: relative; display: inline-block; }
+.thumb img { height: 56px; border-radius: 6px; border: 1px solid var(--border); display: block; }
+.thumb button { position: absolute; top: -6px; right: -6px; padding: 0 6px; border-radius: 50%; line-height: 18px; }
+.term { background: #0d1117; color: #d6dbe4; font: 13px/1.4 var(--mono); padding: 12px; border-radius: 8px; max-height: 55vh; min-height: 120px; overflow: auto; white-space: pre-wrap; word-break: break-word; }
+.term .err { color: #ff8b8b; }
+.term .ok { color: #7ee2a0; }
+.grow { flex: 1; min-width: 200px; }
+.mono { font-family: var(--mono); font-size: 13px; }
+.token-box { border: 1px solid var(--warn); border-radius: 8px; padding: 10px; margin: 10px 0; }
+.msg-bot.live { opacity: .85; }
+[hidden] { display: none !important; }

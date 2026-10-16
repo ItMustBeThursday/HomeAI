@@ -1,0 +1,24 @@
+{
+  "default": "workspace",
+  "github": "ItMustBeThursday/HomeAI",
+  "projects": {
+    "workspace": {
+      "path": "D:\\HomeAI\\workspace",
+      "description": "Shared HomeAI workspace (notes, scratch work)"
+    },
+    "orchestrator": {
+      "path": "D:\\HomeAI\\projects\\orchestrator",
+      "description": "This orchestrator (working copy). Sync publishes orchestrator/ to GitHub.",
+      "test": ["node", "--test"],
+      "sync": ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "D:\\HomeAIGit\\HomeAI\\Sync-Orchestrator.ps1", "-Message", "{message}"]
+    },
+    "homeai-repo": {
+      "path": "D:\\HomeAIGit\\HomeAI",
+      "description": "Checkout of the public GitHub repo ItMustBeThursday/HomeAI"
+    },
+    "companion": {
+      "path": "D:\\HomeAI\\projects\\homeai-companion",
+      "description": "Desktop, Android and remote companion apps"
+    }
+  }
+}

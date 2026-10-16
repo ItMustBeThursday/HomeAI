@@ -1,12 +1,16 @@
-// Local HTTP API (and later the WebUI's static files). Binds to loopback only.
+// HTTP API plus the WebUI's static files. Binds to loopback unless network access is switched on (see config/network.json).
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import { join, normalize, extname, sep } from 'node:path';
 import { timingSafeEqual } from 'node:crypto';
+import { SCOPES } from './access.mjs';
 
 const MAX_BODY = 1_000_000;
+const MAX_BODY_IMAGES = 40_000_000; // chat/task bodies may carry base64 images
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.json': 'application/json', '.png': 'image/png', '.ico': 'image/x-icon' };
 const LOOPBACK_HOSTS = /^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/i;
+const PRIVATE_IPV4 = /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.|169\.254\.)/;
 
 class HttpError extends Error {
   constructor(status, message) {
@@ -21,27 +25,22 @@ function send(res, status, body) {
   res.end(data);
 }
 
-async function readJson(req) {
+async function readJson(req, max = MAX_BODY) {
   if (!/^application\/json\b/i.test(req.headers['content-type'] ?? '')) throw new HttpError(415, 'Content-Type must be application/json');
   let size = 0;
   const chunks = [];
   for await (const chunk of req) {
     size += chunk.length;
-    if (size > MAX_BODY) throw new HttpError(413, 'Request body too large');
+    if (size > max) throw new HttpError(413, 'Request body too large');
     chunks.push(chunk);
   }
   try {
-    return JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
+    const body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
+    if (body === null || typeof body !== 'object' || Array.isArray(body)) throw new Error('not an object');
+    return body;
   } catch {
-    throw new HttpError(400, 'Body is not valid JSON');
+    throw new HttpError(400, 'Body is not valid JSON object');
   }
-}
-
-function tokenOk(req, token) {
-  if (!token) return true;
-  const got = Buffer.from((req.headers.authorization ?? '').replace(/^Bearer\s+/i, ''));
-  const want = Buffer.from(token);
-  return got.length === want.length && timingSafeEqual(got, want);
 }
 
 // Input/validation errors from the orchestrator become 400s; "not found" becomes 404.
@@ -54,82 +53,217 @@ async function userCall(fn) {
   }
 }
 
+// Server-sent events over a POST response. The returned signal aborts if the client disconnects (the Cancel button).
+function openStream(res) {
+  res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-store', 'x-accel-buffering': 'no', 'x-content-type-options': 'nosniff' });
+  const ctrl = new AbortController();
+  res.on('close', () => {
+    if (!res.writableEnded) ctrl.abort();
+  });
+  const ping = setInterval(() => res.writableEnded || res.write(': ping\n\n'), 15_000);
+  ping.unref();
+  return {
+    signal: ctrl.signal,
+    send: (obj) => res.writableEnded || res.write(`data: ${JSON.stringify(obj)}\n\n`),
+    end() {
+      clearInterval(ping);
+      res.end();
+    },
+  };
+}
+
+export function hostAllowed(host, network = {}) {
+  if (LOOPBACK_HOSTS.test(host ?? '')) return true;
+  const name = String(host ?? '').replace(/:\d+$/, '').toLowerCase();
+  if ((network.allowedHosts ?? []).some((h) => h.toLowerCase() === name)) return true;
+  // An IP literal can't be a DNS-rebinding name, so private-range IPs are safe to accept once LAN access is on.
+  return !!network.allowPrivateIPs && PRIVATE_IPV4.test(name);
+}
+
+const OPEN = { id: 'open', name: 'open', scopes: new Set(SCOPES) };
+
+// A request is "remote" if it did not come straight from this PC. Tailscale serve and other proxies connect from
+// loopback, so forwarding headers also count.
+export function isRemote(req) {
+  const proxied = Object.keys(req.headers).some((k) => k.startsWith('x-forwarded-') || k.startsWith('tailscale-') || k === 'forwarded' || k === 'via');
+  const addr = req.socket.remoteAddress ?? '';
+  return proxied || !(addr === '127.0.0.1' || addr === '::1' || addr === '::ffff:127.0.0.1');
+}
+
 // saveConfig(kind, obj) persists an edit ('routes' | 'budgets'); status(config, opts) checks connector health.
-export function createApp({ orchestrator, conversations, scheduler, saveConfig, status, token, webDir, version = '0.0.0', now = Date.now }) {
-  const api = {
-    'GET /api/health': () => ({ ok: true, version }),
-    'GET /api/config': () => {
-      const { connectors, routes, default: def } = orchestrator.config;
-      return { connectors, routes, default: def, caps: orchestrator.caps, editable: !!saveConfig };
-    },
-    'PUT /api/config/routes': async (req) => {
-      if (!saveConfig) throw new HttpError(404, 'Config editing is not enabled');
-      const body = await readJson(req);
-      await userCall(() => orchestrator.setConfig(body));
-      saveConfig('routes', body);
-      return { ok: true };
-    },
-    'PUT /api/config/budgets': async (req) => {
-      if (!saveConfig) throw new HttpError(404, 'Config editing is not enabled');
-      const body = await readJson(req);
-      await userCall(() => orchestrator.setCaps(body));
-      saveConfig('budgets', body);
-      return { ok: true };
-    },
-    'GET /api/usage': (req, url) => {
-      const hours = Number(url.searchParams.get('hours') ?? 24);
-      if (!Number.isFinite(hours) || hours <= 0) throw new HttpError(400, 'hours must be a positive number');
-      return { hours, ...orchestrator.usage(now() - hours * 3_600_000), caps: orchestrator.capStatus() };
-    },
-    'GET /api/status': async (req, url) => {
-      if (!status) throw new HttpError(404, 'Status checks are not enabled');
-      return status(orchestrator.config, { fresh: url.searchParams.get('fresh') === '1' });
-    },
-    'GET /api/history': (req, url) => {
-      const limit = Number(url.searchParams.get('limit') ?? 50);
-      if (!Number.isInteger(limit) || limit < 1 || limit > 1000) throw new HttpError(400, 'limit must be 1-1000');
-      return { tasks: orchestrator.history?.list(limit) ?? [] };
-    },
-    'POST /api/task': async (req) => {
-      const body = await readJson(req);
-      return userCall(() => orchestrator.task({ taskType: body.taskType, prompt: body.prompt, system: body.system, connector: body.connector }));
-    },
-    'GET /api/schedule': () => {
-      if (!scheduler) throw new HttpError(404, 'Scheduler is not enabled');
-      return { ...scheduler.list(), queue: orchestrator.queue() };
-    },
-    'POST /api/schedule/run': async (req) => {
-      if (!scheduler) throw new HttpError(404, 'Scheduler is not enabled');
-      const body = await readJson(req);
-      return userCall(() => scheduler.runNow(body.name));
-    },
-    'POST /api/chat': async (req) => {
-      const body = await readJson(req);
-      return userCall(() => orchestrator.chat({ conversationId: body.conversationId, prompt: body.prompt, taskType: body.taskType, connector: body.connector }));
-    },
-    'GET /api/conversations': () => {
-      if (!conversations) throw new HttpError(404, 'Chat is not enabled');
-      return { conversations: conversations.list() };
-    },
+// auth: createAuth(...) from access.mjs (scoped tokens). token: legacy single bearer token (tests). Neither: open.
+export function createApp({ orchestrator, conversations, scheduler, saveConfig, status, auth, token, attachments, memory, shell, github, network = {}, webDir, version = '0.0.0', now = Date.now, tokenFile }) {
+  const identify = auth
+    ? (h) => auth.identify(h)
+    : token
+      ? (h) => {
+          const got = Buffer.from((h ?? '').replace(/^Bearer\s+/i, ''));
+          const want = Buffer.from(token);
+          return got.length === want.length && timingSafeEqual(got, want) ? OPEN : null;
+        }
+      : () => OPEN;
+
+  const need = (dep, name) => {
+    if (!dep) throw new HttpError(404, `${name} is not enabled`);
+    return dep;
+  };
+  const admin = (ctx) => {
+    if (!ctx.identity.scopes.has('admin')) throw new HttpError(403, 'This needs the admin token');
   };
 
-  // Routes with an :id segment.
-  const idApi = {
-    'GET /api/conversations/:id': (id) => userCall(() => conversations.get(id) ?? Promise.reject(new Error('Conversation not found'))),
-    'PATCH /api/conversations/:id': async (id, req) => {
-      const body = await readJson(req);
-      if (typeof body.title !== 'string' || !body.title.trim()) throw new HttpError(400, 'title must be a non-empty string');
-      return userCall(() => conversations.rename(id, body.title.trim()));
-    },
-    'DELETE /api/conversations/:id': (id) => userCall(() => (conversations.archive(id), { ok: true, archived: id })),
+  // Shared by task and chat: stores images, and for agent routes checks admin rights and resolves the project folder.
+  function prepare(ctx, body, effectiveType, convProject) {
+    const images = body.images === undefined ? [] : need(attachments, 'Image attachments').saveAll(body.images);
+    let cwd;
+    let project;
+    if (orchestrator.isAgentRoute(effectiveType)) {
+      admin(ctx);
+      project = body.project || convProject || undefined;
+      cwd = need(shell, 'Shell access').resolveCwd({ project, cwd: body.cwd });
+      project ??= shell.default;
+    }
+    return { images, cwd, project };
+  }
+
+  // Runs fn with an SSE stream when the body asks for one; otherwise returns fn's result as plain JSON.
+  async function maybeStream(ctx, body, fn) {
+    if (!body.stream) return fn({});
+    const s = openStream(ctx.res);
+    ctx.streamed = true;
+    s.send({ type: 'start' });
+    try {
+      s.send({ type: 'done', ...(await fn({ signal: s.signal, onEvent: s.send })) });
+    } catch (err) {
+      s.send({ type: 'error', error: err.message });
+    }
+    s.end();
+    return undefined;
+  }
+
+  const routes = [];
+  const add = (method, path, scope, handler) => {
+    const names = [];
+    const re = new RegExp(`^${path.replace(/:(\w+)/g, (_, n) => (names.push(n), '([^/]+)'))}$`);
+    routes.push({ method, re, names, scope, handler });
   };
 
-  function findHandler(method, pathname) {
-    const direct = api[`${method} ${pathname}`];
-    if (direct) return direct;
-    const m = /^\/api\/conversations\/([^/]+)$/.exec(pathname);
-    const h = m && conversations && idApi[`${method} /api/conversations/:id`];
-    return h ? (req) => h(decodeURIComponent(m[1]), req) : null;
+  // ---- public-ish ----
+  add('GET', '/api/health', null, () => ({ ok: true, version }));
+  add('GET', '/api/whoami', 'any', (c) => ({ id: c.identity.id, name: c.identity.name, scopes: [...c.identity.scopes] }));
+
+  // ---- read ----
+  add('GET', '/api/config', 'read', () => {
+    const { connectors, routes: r, default: def } = orchestrator.config;
+    return { connectors, routes: r, default: def, caps: orchestrator.caps, editable: !!saveConfig, features: { shell: !!shell, memory: !!memory, github: !!github, images: !!attachments, devices: !!auth, scheduler: !!scheduler } };
+  });
+  add('GET', '/api/usage', 'read', (c) => {
+    const hours = Number(c.url.searchParams.get('hours') ?? 24);
+    if (!Number.isFinite(hours) || hours <= 0) throw new HttpError(400, 'hours must be a positive number');
+    return { hours, ...orchestrator.usage(now() - hours * 3_600_000), caps: orchestrator.capStatus() };
+  });
+  add('GET', '/api/status', 'read', async (c) => need(status, 'Status checks')(orchestrator.config, { fresh: c.url.searchParams.get('fresh') === '1' }));
+  add('GET', '/api/history', 'read', (c) => {
+    const limit = Number(c.url.searchParams.get('limit') ?? 50);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 1000) throw new HttpError(400, 'limit must be 1-1000');
+    return { tasks: orchestrator.history?.list(limit) ?? [] };
+  });
+  add('GET', '/api/schedule', 'read', () => ({ ...need(scheduler, 'Scheduler').list(), queue: orchestrator.queue() }));
+  add('GET', '/api/conversations', 'read', () => ({ conversations: need(conversations, 'Chat').list() }));
+  add('GET', '/api/conversations/:id', 'read', (c) => userCall(() => need(conversations, 'Chat').get(c.params.id) ?? Promise.reject(new Error('Conversation not found'))));
+  add('GET', '/api/projects', 'read', () => ({ default: need(shell, 'Shell access').default, projects: shell.projects() }));
+  add('GET', '/api/memory', 'read', (c) => {
+    const m = need(memory, 'Memory');
+    const q = c.url.searchParams.get('q');
+    return { notes: q ? m.search(q, 20) : m.list() };
+  });
+  add('GET', '/api/github', 'read', (c) => userCall(() => need(github, 'GitHub').summary()));
+  add('GET', '/api/github/issues', 'read', (c) => userCall(async () => ({ issues: await need(github, 'GitHub').issues(c.url.searchParams.get('state') ?? 'open') })));
+  add('GET', '/api/github/runs', 'read', (c) => userCall(async () => ({ runs: await need(github, 'GitHub').runs() })));
+
+  // ---- chat ----
+  add('POST', '/api/task', 'chat', async (c) => {
+    const body = await readJson(c.req, MAX_BODY_IMAGES);
+    const { images, cwd } = await userCall(() => prepare(c, body, body.taskType));
+    return maybeStream(c, body, (extra) => userCall(() => orchestrator.task({ taskType: body.taskType, prompt: body.prompt, system: body.system, connector: body.connector, images, cwd, ...extra })));
+  });
+  add('POST', '/api/chat', 'chat', async (c) => {
+    const body = await readJson(c.req, MAX_BODY_IMAGES);
+    const conv = body.conversationId && conversations ? conversations.get(body.conversationId) : null;
+    const { images, cwd, project } = await userCall(() => prepare(c, body, body.taskType || conv?.taskType, conv?.project));
+    return maybeStream(c, body, (extra) => userCall(() => orchestrator.chat({ conversationId: body.conversationId, prompt: body.prompt, taskType: body.taskType, connector: body.connector, images, cwd, project, ...extra })));
+  });
+  add('PATCH', '/api/conversations/:id', 'chat', async (c) => {
+    const body = await readJson(c.req);
+    if (typeof body.title !== 'string' || !body.title.trim()) throw new HttpError(400, 'title must be a non-empty string');
+    return userCall(() => need(conversations, 'Chat').rename(c.params.id, body.title.trim()));
+  });
+  add('DELETE', '/api/conversations/:id', 'chat', (c) => userCall(() => (need(conversations, 'Chat').archive(c.params.id), { ok: true, archived: c.params.id })));
+  add('GET', '/api/attachments/:id', 'read', async (c) => {
+    const f = await userCall(() => need(attachments, 'Image attachments').file(c.params.id));
+    if (!f) throw new HttpError(404, 'Attachment not found');
+    c.res.writeHead(200, { 'content-type': f.mediaType, 'cache-control': 'private, max-age=86400', 'x-content-type-options': 'nosniff' });
+    c.res.end(readFileSync(f.path));
+    c.streamed = true;
+  });
+
+  // ---- admin ----
+  add('PUT', '/api/config/routes', 'admin', async (c) => {
+    if (!saveConfig) throw new HttpError(404, 'Config editing is not enabled');
+    const body = await readJson(c.req);
+    await userCall(() => orchestrator.setConfig(body));
+    saveConfig('routes', body);
+    return { ok: true };
+  });
+  add('PUT', '/api/config/budgets', 'admin', async (c) => {
+    if (!saveConfig) throw new HttpError(404, 'Config editing is not enabled');
+    const body = await readJson(c.req);
+    await userCall(() => orchestrator.setCaps(body));
+    saveConfig('budgets', body);
+    return { ok: true };
+  });
+  add('POST', '/api/schedule/run', 'admin', async (c) => {
+    const body = await readJson(c.req);
+    return userCall(() => need(scheduler, 'Scheduler').runNow(body.name));
+  });
+
+  add('POST', '/api/memory', 'admin', async (c) => userCall(async () => need(memory, 'Memory').add(await readJson(c.req))));
+  add('PATCH', '/api/memory/:id', 'admin', async (c) => userCall(async () => need(memory, 'Memory').update(c.params.id, await readJson(c.req))));
+  add('DELETE', '/api/memory/:id', 'admin', (c) => userCall(() => (need(memory, 'Memory').remove(c.params.id), { ok: true, trashed: c.params.id })));
+
+  add('POST', '/api/exec', 'admin', async (c) => {
+    const body = await readJson(c.req);
+    const sh = need(shell, 'Shell access');
+    return maybeStream(c, body, (extra) => userCall(() => sh.exec({ command: body.command, project: body.project, cwd: body.cwd, timeoutMs: body.timeoutMs, who: c.identity.id, signal: extra.signal, onData: extra.onEvent && ((d) => extra.onEvent({ type: d.stream, text: d.text })) })));
+  });
+  add('POST', '/api/projects/:name/test', 'admin', async (c) => {
+    const body = await readJson(c.req);
+    const sh = need(shell, 'Shell access');
+    return maybeStream(c, body, (extra) => userCall(() => sh.test(c.params.name, { who: c.identity.id, signal: extra.signal, onData: extra.onEvent && ((d) => extra.onEvent({ type: d.stream, text: d.text })) })));
+  });
+  add('POST', '/api/projects/:name/git', 'admin', async (c) => {
+    const body = await readJson(c.req);
+    const sh = need(shell, 'Shell access');
+    return maybeStream(c, body, (extra) => userCall(() => sh.git(c.params.name, body.action, { message: body.message, who: c.identity.id, signal: extra.signal, onData: extra.onEvent && ((d) => extra.onEvent({ type: d.stream, text: d.text })) })));
+  });
+  add('POST', '/api/github/issues', 'admin', async (c) => userCall(async () => need(github, 'GitHub').createIssue(await readJson(c.req))));
+  add('POST', '/api/github/comment', 'admin', async (c) => {
+    const body = await readJson(c.req);
+    return userCall(() => need(github, 'GitHub').comment(body.number, body.body));
+  });
+
+  add('GET', '/api/devices', 'admin', () => ({ devices: need(auth, 'Device tokens').listDevices(), scopes: SCOPES }));
+  add('POST', '/api/devices', 'admin', async (c) => {
+    const body = await readJson(c.req);
+    return userCall(() => need(auth, 'Device tokens').addDevice({ name: body.name, scopes: body.scopes })); // plain token is returned once
+  });
+  add('DELETE', '/api/devices/:id', 'admin', (c) => userCall(() => (need(auth, 'Device tokens').removeDevice(c.params.id), { ok: true })));
+
+  // The WebUI on this PC fetches the admin token here so you aren't asked to paste it. Refused for anything that
+  // arrived through a proxy (Tailscale serve, LAN), for non-loopback hosts, and for cross-site browser requests.
+  function bootstrap(req) {
+    const site = req.headers['sec-fetch-site'];
+    if (!tokenFile || !LOOPBACK_HOSTS.test(req.headers.host ?? '') || isRemote(req) || (site && site !== 'same-origin' && site !== 'none')) throw new HttpError(403, 'Token bootstrap is only available to the WebUI on this PC');
+    return { token: readFileSync(tokenFile, 'utf8').trim() };
   }
 
   async function serveStatic(res, pathname) {
@@ -143,20 +277,42 @@ export function createApp({ orchestrator, conversations, scheduler, saveConfig, 
     } catch {
       throw new HttpError(404, 'Not found');
     }
-    res.writeHead(200, { 'content-type': MIME[extname(file).toLowerCase()] ?? 'application/octet-stream', 'cache-control': 'no-cache', 'x-content-type-options': 'nosniff', 'content-security-policy': "default-src 'self'; style-src 'self' 'unsafe-inline'" });
+    res.writeHead(200, { 'content-type': MIME[extname(file).toLowerCase()] ?? 'application/octet-stream', 'cache-control': 'no-cache', 'x-content-type-options': 'nosniff', 'content-security-policy': "default-src 'self'; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'" });
     res.end(data);
   }
 
   return async function handle(req, res) {
     try {
       // Rejecting foreign Host headers blocks DNS-rebinding pages from reaching the API.
-      if (!LOOPBACK_HOSTS.test(req.headers.host ?? '')) throw new HttpError(421, 'Unexpected Host header');
+      if (!hostAllowed(req.headers.host, network)) throw new HttpError(421, 'Unexpected Host header');
       const url = new URL(req.url, 'http://127.0.0.1');
       if (url.pathname.startsWith('/api/')) {
-        const handler = findHandler(req.method, url.pathname);
-        if (!handler) throw new HttpError(404, 'Unknown endpoint');
-        if (url.pathname !== '/api/health' && !tokenOk(req, token)) throw new HttpError(401, 'Missing or wrong bearer token');
-        return send(res, 200, await handler(req, url));
+        if (url.pathname === '/api/bootstrap' && req.method === 'GET') return send(res, 200, bootstrap(req));
+        let match = null;
+        let params = {};
+        let pathKnown = false;
+        for (const r of routes) {
+          const m = r.re.exec(url.pathname);
+          if (!m) continue;
+          pathKnown = true;
+          if (r.method !== req.method) continue;
+          match = r;
+          params = Object.fromEntries(r.names.map((n, i) => [n, decodeURIComponent(m[i + 1])]));
+          break;
+        }
+        if (!match) throw new HttpError(pathKnown ? 405 : 404, pathKnown ? 'Method not allowed' : 'Unknown endpoint');
+        let identity = null;
+        if (match.scope !== null) {
+          identity = identify(req.headers.authorization);
+          if (!identity) throw new HttpError(401, 'Missing or wrong bearer token');
+          // Shell, agents, config and devices stay on this PC unless network.remoteAdmin is switched on.
+          if (!network.remoteAdmin && identity.scopes.has('admin') && isRemote(req)) identity = { ...identity, scopes: new Set(['read', 'chat']) };
+          if (match.scope !== 'any' && !identity.scopes.has(match.scope)) throw new HttpError(403, `This needs the "${match.scope}" scope`);
+        }
+        const ctx = { req, res, url, params, identity, streamed: false };
+        const result = await match.handler(ctx);
+        if (!ctx.streamed) send(res, 200, result);
+        return undefined;
       }
       if (req.method !== 'GET' && req.method !== 'HEAD') throw new HttpError(405, 'Method not allowed');
       return await serveStatic(res, url.pathname);
