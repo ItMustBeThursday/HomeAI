@@ -1,198 +1,296 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="system">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>HomeAI Orchestrator</title>
+  <meta name="color-scheme" content="light dark">
+  <title>HomeAI</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <header>
-    <span class="brand">HomeAI</span>
-    <nav id="tabs">
-      <button data-tab="chat" class="active">Chat</button>
-      <button data-tab="terminal" data-feature="shell">Terminal</button>
-      <button data-tab="projects" data-feature="shell">Projects</button>
-      <button data-tab="memory" data-feature="memory">Memory</button>
-      <button data-tab="usage">Usage</button>
-      <button data-tab="history">History</button>
-      <button data-tab="status">Status</button>
-      <button data-tab="schedule">Schedule</button>
-      <button data-tab="config">Config</button>
-      <button data-tab="devices" data-feature="devices">Devices</button>
-      <button data-tab="logan">Logan</button>
-    </nav>
-    <span id="health" class="health" title="Service health">…</span>
-  </header>
+<div id="app" class="app">
+  <aside id="sidebar" class="sidebar" aria-label="Main navigation">
+    <div class="side-head">
+      <div class="logo" aria-hidden="true">H</div>
+      <div class="brand-text"><strong>HomeAI</strong><span id="health" class="health" title="Service health">…</span></div>
+      <button id="collapse" class="icon-btn" title="Collapse sidebar" aria-label="Collapse sidebar"></button>
+    </div>
+    <button id="open-palette" class="palette-hint" title="Command palette (Ctrl+K)">
+      <span class="ico" data-icon="search"></span><span class="lbl">Search…</span><kbd>Ctrl K</kbd>
+    </button>
+    <nav id="tabs" class="nav"></nav>
+    <div class="side-foot">
+      <button id="theme-quick" class="nav-item" title="Cycle theme"><span class="ico" data-icon="sun"></span><span class="lbl">Theme</span></button>
+      <button data-tab="settings" class="nav-item"><span class="ico" data-icon="sliders"></span><span class="lbl">Settings</span></button>
+    </div>
+  </aside>
 
-  <main>
-    <section id="tab-chat" class="tab active">
-      <aside class="convs">
-        <button id="new-chat" class="primary">+ New chat</button>
-        <ul id="conv-list"></ul>
-      </aside>
-      <div class="thread-wrap">
-        <div class="thread-head">
-          <h2 id="conv-title">New chat</h2>
-          <span class="spacer"></span>
-          <button id="rename-chat" class="ghost" hidden>Rename</button>
-          <button id="archive-chat" class="ghost" hidden>Archive</button>
-        </div>
-        <div id="thread" class="thread"><p class="empty">Ask anything. The route decides which model answers; you can pin one below.</p></div>
-        <form id="composer">
-          <div id="attach-strip" class="attach-strip" hidden></div>
-          <textarea id="prompt" rows="3" placeholder="Message… (Ctrl+Enter to send; paste or drop images)" required></textarea>
-          <div class="composer-row">
-            <label>Route <select id="route"></select></label>
-            <label>Model <select id="pin"><option value="">Auto (route chain)</option></select></label>
-            <label id="project-label" hidden>Project <select id="project"></select></label>
-            <button type="button" id="attach" class="ghost" data-feature="images" title="Attach images">Attach image</button>
-            <input type="file" id="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden>
-            <span class="spacer"></span>
-            <span id="busy" class="muted"></span>
-            <button type="button" id="stop" class="ghost" hidden>Stop</button>
-            <button type="submit" class="primary" id="send">Send</button>
+  <div class="content">
+    <header class="topbar">
+      <button id="menu" class="icon-btn only-mobile" aria-label="Open menu"></button>
+      <h1 id="page-title">Chat</h1>
+      <span id="page-sub" class="muted"></span>
+      <span class="spacer"></span>
+      <span id="who" class="chip" hidden></span>
+    </header>
+
+    <main>
+      <!-- CHAT -->
+      <section id="tab-chat" class="tab active">
+        <aside class="rail">
+          <div class="rail-head">
+            <button id="new-chat" class="primary block"><span class="ico" data-icon="plus"></span>New chat</button>
+            <input id="conv-search" type="search" placeholder="Filter conversations" aria-label="Filter conversations">
           </div>
+          <div id="conv-list" class="conv-list" role="list"></div>
+        </aside>
+        <div class="thread-wrap">
+          <div class="thread-head">
+            <h2 id="conv-title">New chat</h2>
+            <span id="conv-meta" class="muted"></span>
+            <span class="spacer"></span>
+            <button id="pin-chat" class="ghost sm" hidden>Pin</button>
+            <button id="export-chat" class="ghost sm" hidden>Export</button>
+            <button id="rename-chat" class="ghost sm" hidden>Rename</button>
+            <button id="archive-chat" class="ghost sm" hidden>Archive</button>
+          </div>
+          <div class="thread-scroll">
+            <div id="thread" class="thread" aria-live="polite"></div>
+            <button id="jump-bottom" class="jump" hidden aria-label="Jump to latest">↓</button>
+          </div>
+          <form id="composer" class="composer">
+            <div id="attach-strip" class="attach-strip" hidden></div>
+            <textarea id="prompt" rows="1" placeholder="Message HomeAI…   (Enter to send · Shift+Enter newline · / for commands)" required></textarea>
+            <div id="slash-menu" class="slash-menu" hidden></div>
+            <div class="composer-row">
+              <label class="sel">Route <select id="route"></select></label>
+              <label class="sel">Model <select id="pin"><option value="">Auto (route chain)</option></select></label>
+              <label id="project-label" class="sel" hidden>Project <select id="project"></select></label>
+              <button type="button" id="attach" class="ghost sm" data-feature="images" title="Attach images">Attach</button>
+              <input type="file" id="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden>
+              <span class="spacer"></span>
+              <span id="busy" class="muted"></span>
+              <span id="count" class="muted"></span>
+              <button type="button" id="stop" class="danger sm" hidden>Stop</button>
+              <button type="submit" class="primary" id="send">Send</button>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      <!-- OVERVIEW -->
+      <section id="tab-overview" class="tab page">
+        <div id="ov-cards" class="cards"></div>
+        <div class="grid-2">
+          <div class="panel"><div class="panel-head"><h3>Backends</h3><button id="ov-refresh" class="ghost sm">Refresh</button></div><div id="ov-backends"></div></div>
+          <div class="panel"><div class="panel-head"><h3>Budgets, rolling 24h</h3></div><div id="ov-caps"></div></div>
+        </div>
+        <div class="grid-2">
+          <div class="panel"><div class="panel-head"><h3>Recent activity</h3><button class="ghost sm" data-go="history">All history</button></div><div id="ov-recent"></div></div>
+          <div class="panel"><div class="panel-head"><h3>Quick actions</h3></div><div id="ov-actions" class="actions"></div></div>
+        </div>
+      </section>
+
+      <!-- TERMINAL -->
+      <section id="tab-terminal" class="tab page">
+        <p class="muted">Runs PowerShell on this PC inside a registered project folder. Every command is logged to <code>data/exec.jsonl</code>. Anything mentioning OneDrive is refused.</p>
+        <div class="toolbar">
+          <label class="sel">Project <select id="term-project"></select></label>
+          <label class="sel">Folder <input id="term-cwd" placeholder="(project root)" size="18"></label>
+          <button id="term-clear" class="ghost sm">Clear</button>
+        </div>
+        <form id="term-form" class="row">
+          <input id="term-cmd" class="code grow" placeholder="Command, e.g. node --test" autocomplete="off" spellcheck="false" required>
+          <button class="primary" id="term-run">Run</button>
+          <button type="button" id="term-stop" class="danger" hidden>Stop</button>
         </form>
-      </div>
-    </section>
+        <div id="term-hist" class="chips"></div>
+        <pre id="term-out" class="term">Output appears here.</pre>
+      </section>
 
-    <section id="tab-terminal" class="tab">
-      <p class="muted">Runs PowerShell on this PC as you, inside a registered project folder. Every command is logged to <code>data/exec.jsonl</code>. Anything mentioning OneDrive is refused.</p>
-      <div class="toolbar">
-        <label>Project <select id="term-project"></select></label>
-        <label>Folder <input id="term-cwd" placeholder="(project root)" size="18"></label>
-      </div>
-      <form id="term-form" class="row">
-        <input id="term-cmd" class="code grow" placeholder="Command, e.g. node --test" autocomplete="off" spellcheck="false" required>
-        <button class="primary" id="term-run">Run</button>
-        <button type="button" id="term-stop" class="ghost" hidden>Stop</button>
-      </form>
-      <pre id="term-out" class="term">Output appears here.</pre>
-    </section>
-
-    <section id="tab-projects" class="tab">
-      <div id="projects-table"></div>
-      <pre id="proj-out" class="term">Pick an action above. Test and git output appears here.</pre>
-      <h3>GitHub <small id="gh-repo"></small></h3>
-      <div class="toolbar"><button id="gh-refresh" class="ghost">Refresh</button><span id="gh-msg" class="muted"></span></div>
-      <div id="gh-summary"></div>
-      <div class="two-col">
-        <div><h3>Issues and pull requests</h3><div id="gh-issues"></div></div>
-        <div>
-          <h3>New issue <small>publishes publicly</small></h3>
-          <input id="gh-title" placeholder="Title" style="width:100%">
-          <textarea id="gh-body" rows="4" placeholder="Details" style="width:100%;margin-top:6px"></textarea>
-          <div class="row" style="margin-top:6px"><button id="gh-create" class="primary">Create issue</button><span id="gh-create-msg" class="msg"></span></div>
+      <!-- PROJECTS -->
+      <section id="tab-projects" class="tab page">
+        <div id="projects-table"></div>
+        <pre id="proj-out" class="term">Pick an action above. Test and git output appears here.</pre>
+        <div class="panel-head"><h3>GitHub <small id="gh-repo"></small></h3><button id="gh-refresh" class="ghost sm">Refresh</button><span id="gh-msg" class="muted"></span></div>
+        <div id="gh-summary"></div>
+        <div class="grid-2">
+          <div class="panel"><div class="panel-head"><h3>Issues and pull requests</h3></div><div id="gh-issues"></div></div>
+          <div class="panel">
+            <div class="panel-head"><h3>New issue <small>publishes publicly</small></h3></div>
+            <input id="gh-title" placeholder="Title" class="block">
+            <textarea id="gh-body" rows="4" placeholder="Details" class="block mt"></textarea>
+            <div class="row mt"><button id="gh-create" class="primary">Create issue</button><span id="gh-create-msg" class="msg"></span></div>
+          </div>
         </div>
-      </div>
-    </section>
+      </section>
 
-    <section id="tab-memory" class="tab">
-      <p class="muted">Durable facts and preferences. Routes with <code>"memory": true</code> see notes tagged <code>core</code> plus the notes that best match each prompt. Deleted notes move to <code>data/memory/trash</code>.</p>
-      <div class="toolbar"><input id="mem-search" placeholder="Search…" size="24"><button id="mem-refresh" class="ghost">Refresh</button></div>
-      <div id="mem-list"></div>
-      <h3>Add or edit a note</h3>
-      <form id="mem-form">
-        <input id="mem-title" placeholder="Title" style="width:100%" required>
-        <textarea id="mem-text" rows="4" placeholder="The fact or preference" style="width:100%;margin-top:6px" required></textarea>
-        <div class="row" style="margin-top:6px">
-          <input id="mem-tags" placeholder="tags, comma separated (core = always included)" size="40">
-          <button class="primary" id="mem-save">Save note</button>
-          <button type="button" class="ghost" id="mem-cancel" hidden>Cancel edit</button>
-          <span id="mem-msg" class="msg"></span>
+      <!-- MEMORY -->
+      <section id="tab-memory" class="tab page">
+        <p class="muted">Durable facts and preferences. Routes with <code>"memory": true</code> see notes tagged <code>core</code> plus the notes that best match each prompt. Deleted notes move to <code>data/memory/trash</code>.</p>
+        <div class="toolbar"><input id="mem-search" type="search" placeholder="Search notes…" size="28"><button id="mem-refresh" class="ghost sm">Refresh</button></div>
+        <div id="mem-list" class="note-grid"></div>
+        <div class="panel mt">
+          <div class="panel-head"><h3 id="mem-form-title">Add a note</h3></div>
+          <form id="mem-form">
+            <input id="mem-title" placeholder="Title" class="block" required>
+            <textarea id="mem-text" rows="4" placeholder="The fact or preference" class="block mt" required></textarea>
+            <div class="row mt">
+              <input id="mem-tags" placeholder="tags, comma separated (core = always included)" size="40">
+              <button class="primary" id="mem-save">Save note</button>
+              <button type="button" class="ghost" id="mem-cancel" hidden>Cancel edit</button>
+              <span id="mem-msg" class="msg"></span>
+            </div>
+          </form>
         </div>
-      </form>
-    </section>
+      </section>
 
-    <section id="tab-usage" class="tab">
-      <div class="toolbar">
-        <label>Window <select id="usage-hours"><option value="24">Last 24 hours</option><option value="168">Last 7 days</option><option value="720">Last 30 days</option></select></label>
-        <button id="usage-refresh" class="ghost">Refresh</button>
-      </div>
-      <div id="usage-totals" class="cards"></div>
-      <h3>Daily budgets (rolling 24h)</h3>
-      <div id="usage-caps"></div>
-      <div class="two-col">
-        <div><h3>By model</h3><div id="usage-conn"></div></div>
-        <div><h3>By route</h3><div id="usage-route"></div></div>
-      </div>
-    </section>
-
-    <section id="tab-history" class="tab">
-      <div class="toolbar"><button id="history-refresh" class="ghost">Refresh</button><span class="muted">Newest first. Click a row for the prompt, answer and fallback attempts.</span></div>
-      <div id="history"></div>
-    </section>
-
-    <section id="tab-status" class="tab">
-      <div class="toolbar"><button id="status-refresh" class="ghost">Check now</button><span id="status-time" class="muted"></span></div>
-      <div id="status-backends" class="cards"></div>
-      <div id="status-conn"></div>
-    </section>
-
-    <section id="tab-schedule" class="tab">
-      <p class="muted">Timed jobs run by the service itself (replaces OpenClaw automations). A job runs either a <code>command</code> or a model <code>prompt</code> (optionally on the <code>agent</code> route in a <code>project</code>). Jobs are defined in <code>config/schedule.json</code>; set <code>"enabled": true</code> there to turn the scheduler on. <b>Run now</b> works either way, so you can test a job.</p>
-      <div id="schedule-state" class="toolbar"></div>
-      <div id="schedule-jobs"></div>
-      <h3>Request queue</h3>
-      <div id="schedule-queue"></div>
-    </section>
-
-    <section id="tab-config" class="tab">
-      <p class="muted">Edits are validated before they take effect, apply immediately without a restart, and the previous file is backed up to <code>data/config-backups</code>.</p>
-      <div id="route-summary"></div>
-      <div class="two-col">
-        <div>
-          <h3>Routes &amp; connectors <small>config/routes.json</small></h3>
-          <textarea id="cfg-routes" class="code" spellcheck="false"></textarea>
-          <div class="row"><button id="save-routes" class="primary">Save routes</button><span id="msg-routes" class="msg"></span></div>
+      <!-- USAGE -->
+      <section id="tab-usage" class="tab page">
+        <div class="toolbar">
+          <label class="sel">Window <select id="usage-hours"><option value="24">Last 24 hours</option><option value="168">Last 7 days</option><option value="720">Last 30 days</option></select></label>
+          <button id="usage-refresh" class="ghost sm">Refresh</button>
         </div>
-        <div>
-          <h3>Budgets <small>config/budgets.json</small></h3>
-          <textarea id="cfg-budgets" class="code" spellcheck="false"></textarea>
-          <div class="row"><button id="save-budgets" class="primary">Save budgets</button><span id="msg-budgets" class="msg"></span></div>
-          <p class="muted">Shape: <code>{"daily": {"globalTokens": n, "perConnector": {"name": {"tokens": n, "calls": n}}, "perTaskType": {"route": {…}}}}</code></p>
+        <div id="usage-totals" class="cards"></div>
+        <div class="panel"><div class="panel-head"><h3>Daily budgets (rolling 24h)</h3></div><div id="usage-caps"></div></div>
+        <div class="grid-2 mt">
+          <div class="panel"><div class="panel-head"><h3>By model</h3></div><div id="usage-conn"></div></div>
+          <div class="panel"><div class="panel-head"><h3>By route</h3></div><div id="usage-route"></div></div>
         </div>
-      </div>
-    </section>
+      </section>
 
-    <section id="tab-devices" class="tab">
-      <p class="muted">The service always requires a token. This PC's WebUI picks up the admin token automatically. Other devices (phones, Logan displays, companion apps) get their own limited token here: <b>read</b> = dashboards, <b>chat</b> = read + models (never shell or agents), <b>logan</b> = the Logan feed only, <b>admin</b> = everything. Tokens are shown once and stored only as hashes.</p>
-      <div id="whoami" class="toolbar"></div>
-      <div id="dev-list"></div>
-      <h3>Add a device</h3>
-      <form id="dev-form" class="row">
-        <input id="dev-name" placeholder="Name, e.g. Adam's phone" size="26" required>
-        <label><input type="checkbox" name="scope" value="read" checked> read</label>
-        <label><input type="checkbox" name="scope" value="chat"> chat</label>
-        <label><input type="checkbox" name="scope" value="logan"> logan</label>
-        <label><input type="checkbox" name="scope" value="admin"> admin</label>
-        <button class="primary">Create token</button>
-        <span id="dev-msg" class="msg"></span>
-      </form>
-      <div id="dev-token" class="token-box" hidden></div>
-      <h3>Reaching the service from other devices</h3>
-      <p class="muted">By default it listens on this PC only. Edit <code>config/network.json</code> and restart: set <code>host</code> to <code>0.0.0.0</code> (or your Tailscale IP), add names to <code>allowedHosts</code> (e.g. your <code>*.ts.net</code> name) or set <code>allowPrivateIPs</code> for LAN/Tailscale addresses. Shell, agents, config and device management still only work from this PC unless <code>remoteAdmin</code> is true. Easiest private HTTPS: <code>tailscale serve --bg 18850</code>, then add the Tailscale name to <code>allowedHosts</code>. See README, "Network access".</p>
-    </section>
+      <!-- HISTORY -->
+      <section id="tab-history" class="tab page">
+        <div class="toolbar">
+          <input id="history-search" type="search" placeholder="Filter by prompt, route or model…" size="32">
+          <label class="sel">Result <select id="history-result"><option value="">All</option><option value="ok">OK</option><option value="fallback">After fallback</option><option value="failed">Failed</option></select></label>
+          <button id="history-refresh" class="ghost sm">Refresh</button>
+          <span id="history-count" class="muted"></span>
+        </div>
+        <div id="history"></div>
+      </section>
 
-    <section id="tab-logan" class="tab">
-      <div class="placeholder">
-        <h2>Logan menus</h2>
-        <p>Coming in Phase 3: the approved menu catalog, version history with rollback, the rules check (ratings, subscribed services, nothing paid), the device feed, and Logan's choice log.</p>
-        <p class="muted">Switch presses stay deterministic. Models only help draft menus, which you approve before they go live. Devices already can get a <b>logan</b>-scope token (Devices tab).</p>
-      </div>
-    </section>
-  </main>
+      <!-- STATUS -->
+      <section id="tab-status" class="tab page">
+        <div class="toolbar"><button id="status-refresh" class="ghost sm">Check now</button><span id="status-time" class="muted"></span></div>
+        <div id="status-backends" class="cards"></div>
+        <div id="status-conn"></div>
+      </section>
 
-  <dialog id="token-dialog">
-    <form method="dialog" id="token-form">
-      <h3>Access token</h3>
-      <p class="muted">This service requires a token. On the PC running it, it is in <code>data/token.txt</code>; on other devices use a token from the Devices tab. It is stored only in this browser.</p>
-      <input id="token-input" type="password" autocomplete="off" required>
-      <div class="row"><span class="spacer"></span><button class="primary">Save</button></div>
-    </form>
-  </dialog>
+      <!-- SCHEDULE -->
+      <section id="tab-schedule" class="tab page">
+        <p class="muted">Timed jobs run by the service itself. A job runs a <code>command</code> or a model <code>prompt</code> (optionally on the <code>agent</code> route in a <code>project</code>). Jobs live in <code>config/schedule.json</code>; set <code>"enabled": true</code> there to turn the scheduler on. <b>Run now</b> works either way.</p>
+        <div id="schedule-state" class="toolbar"></div>
+        <div id="schedule-jobs"></div>
+        <div class="panel-head mt"><h3>Request queue</h3></div>
+        <div id="schedule-queue"></div>
+      </section>
 
-  <script type="module" src="app.js"></script>
+      <!-- CONFIG -->
+      <section id="tab-config" class="tab page">
+        <p class="muted">Edits are validated before they take effect, apply immediately, and the previous file is backed up to <code>data/config-backups</code>. Press Ctrl+S inside an editor to save.</p>
+        <div id="route-summary"></div>
+        <div class="grid-2 mt">
+          <div class="panel">
+            <div class="panel-head"><h3>Routes &amp; connectors <small>config/routes.json</small></h3><span id="dirty-routes" class="pill warn" hidden>unsaved</span></div>
+            <textarea id="cfg-routes" class="code editor" spellcheck="false"></textarea>
+            <div class="row mt"><button id="save-routes" class="primary">Save routes</button><button id="fmt-routes" class="ghost sm">Format</button><button id="reset-routes" class="ghost sm">Revert</button><span id="msg-routes" class="msg"></span></div>
+          </div>
+          <div class="panel">
+            <div class="panel-head"><h3>Budgets <small>config/budgets.json</small></h3><span id="dirty-budgets" class="pill warn" hidden>unsaved</span></div>
+            <textarea id="cfg-budgets" class="code editor" spellcheck="false"></textarea>
+            <div class="row mt"><button id="save-budgets" class="primary">Save budgets</button><button id="fmt-budgets" class="ghost sm">Format</button><button id="reset-budgets" class="ghost sm">Revert</button><span id="msg-budgets" class="msg"></span></div>
+            <p class="muted">Shape: <code>{"daily": {"globalTokens": n, "perConnector": {"name": {"tokens": n, "calls": n}}, "perTaskType": {"route": {…}}}}</code></p>
+          </div>
+        </div>
+      </section>
+
+      <!-- DEVICES -->
+      <section id="tab-devices" class="tab page">
+        <p class="muted">The service always requires a token. This PC's WebUI picks up the admin token automatically. Other devices get a limited token: <b>read</b> dashboards, <b>chat</b> read + models (never shell or agents), <b>logan</b> the Logan feed only, <b>admin</b> everything. Tokens are shown once and stored only as hashes.</p>
+        <div id="whoami" class="toolbar"></div>
+        <div id="dev-list"></div>
+        <div class="panel mt">
+          <div class="panel-head"><h3>Add a device</h3></div>
+          <form id="dev-form" class="row">
+            <input id="dev-name" placeholder="Name, e.g. Adam's phone" size="26" required>
+            <label><input type="checkbox" name="scope" value="read" checked> read</label>
+            <label><input type="checkbox" name="scope" value="chat"> chat</label>
+            <label><input type="checkbox" name="scope" value="logan"> logan</label>
+            <label><input type="checkbox" name="scope" value="admin"> admin</label>
+            <button class="primary">Create token</button>
+            <span id="dev-msg" class="msg"></span>
+          </form>
+          <div id="dev-token" class="token-box" hidden></div>
+        </div>
+        <details class="panel mt"><summary>Reaching the service from other devices</summary>
+          <p class="muted">By default it listens on this PC only. Edit <code>config/network.json</code> and restart: set <code>host</code> to <code>0.0.0.0</code> (or your Tailscale IP), add names to <code>allowedHosts</code> or set <code>allowPrivateIPs</code> for LAN/Tailscale addresses. Shell, agents, config and device management only work from this PC unless <code>remoteAdmin</code> is true. Private HTTPS: <code>tailscale serve --bg 18850</code>, then add the Tailscale name to <code>allowedHosts</code>. See README, "Network access".</p>
+        </details>
+      </section>
+
+      <!-- LOGAN -->
+      <section id="tab-logan" class="tab page">
+        <div class="empty-state">
+          <h2>Logan menus</h2>
+          <p>Coming in Phase 3: the approved menu catalog, version history with rollback, the rules check (ratings, subscribed services, nothing paid), the device feed, and Logan's choice log.</p>
+          <p class="muted">Switch presses stay deterministic. Models only help draft menus, which you approve before they go live. Devices can already get a <b>logan</b>-scope token (Devices tab).</p>
+        </div>
+      </section>
+
+      <!-- SETTINGS -->
+      <section id="tab-settings" class="tab page">
+        <div class="panel">
+          <div class="panel-head"><h3>Appearance</h3></div>
+          <div class="setting"><span>Theme</span><div id="theme-seg" class="seg"></div></div>
+          <div class="setting"><span>Accent</span><div id="accent-swatches" class="swatches"></div></div>
+          <div class="setting"><span>Density</span><div id="density-seg" class="seg"></div></div>
+          <div class="setting"><span>Message width</span><div id="width-seg" class="seg"></div></div>
+        </div>
+        <div class="panel mt">
+          <div class="panel-head"><h3>Chat</h3></div>
+          <div class="setting"><span>Enter sends the message</span><label class="switch"><input type="checkbox" id="set-enter"><i></i></label></div>
+          <div class="setting"><span>Show timing, route and token details</span><label class="switch"><input type="checkbox" id="set-meta"><i></i></label></div>
+        </div>
+        <div class="panel mt">
+          <div class="panel-head"><h3>Keyboard shortcuts</h3></div>
+          <table class="kv"><tbody id="shortcut-table"></tbody></table>
+        </div>
+        <div class="panel mt">
+          <div class="panel-head"><h3>Access</h3></div>
+          <div class="row"><button id="forget-token" class="ghost">Forget saved token in this browser</button><span class="muted">On this PC the token is re-fetched automatically.</span></div>
+        </div>
+      </section>
+    </main>
+  </div>
+</div>
+
+<div id="toasts" class="toasts" aria-live="polite"></div>
+<div id="scrim" class="scrim" hidden></div>
+
+<dialog id="palette" class="palette">
+  <input id="palette-input" placeholder="Type a command, page or conversation…" autocomplete="off" spellcheck="false" aria-label="Command palette">
+  <div id="palette-list" class="palette-list" role="listbox"></div>
+  <div class="palette-foot muted"><span>↑↓ navigate</span><span>Enter select</span><span>Esc close</span></div>
+</dialog>
+
+<dialog id="token-dialog">
+  <form method="dialog" id="token-form">
+    <h3>Access token</h3>
+    <p class="muted">This service requires a token. On the PC running it, it is in <code>data/token.txt</code>; on other devices use a token from the Devices tab. It is stored only in this browser.</p>
+    <input id="token-input" type="password" autocomplete="off" required class="block">
+    <div class="row mt"><span class="spacer"></span><button class="primary">Save</button></div>
+  </form>
+</dialog>
+
+<dialog id="input-dialog">
+  <form method="dialog" id="input-form">
+    <h3 id="input-title">Input</h3>
+    <p id="input-msg" class="muted"></p>
+    <input id="input-field" autocomplete="off" class="block">
+    <div class="row mt"><span class="spacer"></span><button type="button" id="input-cancel" class="ghost">Cancel</button><button value="ok" class="primary" id="input-ok">OK</button></div>
+  </form>
+</dialog>
+
+<script type="module" src="app.js"></script>
 </body>
 </html>
