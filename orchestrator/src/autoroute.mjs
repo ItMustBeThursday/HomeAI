@@ -9,6 +9,9 @@ const ACT_RULES = [
   [/\b[\w-]+\.(m?js|cjs|ts|tsx|jsx|py|json|md|ps1|psm1|txt|html|css|ya?ml|toml|csv|bat|cmd|sh|log|ini|cfg|env)\b/i, 'mentions a file'],
   [/^\s*(git|npm|npx|node|pnpm|yarn|pip|python|py|winget|choco|powershell|pwsh|cd|ls|dir|mkdir|rm|del|copy|move|curl|ollama|claude|codex)\b/i, 'starts with a command'],
   [/`[^`]*\b(git|npm|node|pip|python|powershell|pwsh|Get-\w+|Start-\w+)\b[^`]*`/, 'contains a command'],
+  [/\b[a-z]:\s*(and|&|,|\/)?\s*([a-z]:\s*)?drives?\b|\b[a-z]\s+drive\b/i, 'mentions a drive'],
+  [/\b(edit|write|create|modify|change|save|read|open|delete|fix|update|patch|rewrite)\b[^.?!\n]{0,60}\b(files?|code|folders?|director(y|ies)|scripts?|configs?|repo|source)\b/i, 'asks to work with files'],
+  [/\byour (own )?(code|source|server|config|files?|settings)\b/i, 'asks about changing itself'],
 ];
 const PLAN_RULES = [
   /\b(reorgani[sz]e|restructure|re-?arrange|clean ?up|tidy|consolidate|migrate)\b[\s\S]{0,60}\b(folders?|director(y|ies)|files|projects?|layout|structure|workspace|repo)\b/i,
@@ -39,7 +42,7 @@ function checkPrompt(prompt, previous, withPlan) {
   const lines = [
     'Classify the LAST user message for a home assistant that can also operate a Windows PC.',
     'CHAT = it can be answered with text alone: questions, explanations, advice, opinions, writing or rewriting text, maths, small talk.',
-    'ACT = it needs something done or looked up on the computer or the web: run commands, read/create/edit files, check a project, run tests, use git, install or restart something, search the web or fetch a page, anything about the current state of the PC or files.',
+    'ACT = it needs something done or looked up on the computer or the web: run commands, read/create/edit files, check a project, run tests, use git, install or restart something, search the web or fetch a page, anything about the current state of the PC or files. Also ACT: any question about whether you can or should touch files, code, drives or the PC, because the ACT assistant has those tools and the CHAT one does not.',
   ];
   if (withPlan) lines.push('PLAN = a large or risky change to files or folder structure (reorganising, moving or renaming many files, bulk deletes) that should be planned and approved before anything is changed.');
   lines.push(`Reply with exactly one word: ${withPlan ? 'CHAT, ACT or PLAN' : 'CHAT or ACT'}.`);

@@ -195,7 +195,9 @@ details.panel p { margin-top: 8px; }
 .nav-row .nav-item { padding-right: 34px; }
 .chev { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 26px; height: 26px; padding: 0; background: transparent; border-color: transparent; color: var(--muted); transition: transform .15s; }
 .chev:not(.open) { transform: translateY(-50%) rotate(-90deg); }
-.conv-panel { display: flex; flex-direction: column; gap: 6px; margin: 2px 0 6px 12px; padding-left: 8px; border-left: 1px solid var(--border); min-height: 0; max-height: 46vh; }
+/* The nav is a scrolling flex column; without flex-shrink:0 the panel collapsed and its list painted over the items below. */
+.nav > * { flex-shrink: 0; }
+.conv-panel { display: flex; flex-direction: column; gap: 6px; margin: 2px 0 6px 12px; padding: 0 0 0 8px; border-left: 1px solid var(--border); height: min(46vh, 340px); background: var(--surface); position: relative; z-index: 1; }
 .conv-panel > .primary { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 4px 10px; }
 .conv-panel > input { padding: 4px 8px; font-size: 13px; }
 .app.collapsed .conv-panel, .app.collapsed .chev { display: none; }
