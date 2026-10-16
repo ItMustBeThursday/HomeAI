@@ -281,14 +281,28 @@ const SUBS = {
   schedule: 'Timed jobs and the request queue', config: 'Routes, connectors and budgets', connections: 'Logins for GitHub and other services', devices: 'Tokens for phones and displays', logan: 'Menu catalog (coming)', settings: 'Appearance and shortcuts',
 };
 
+const convPanel = $('#conv-panel');
+const convOpenNow = () => ui.convOpen !== false;
+function applyConvPanel() {
+  const open = convOpenNow();
+  convPanel.hidden = !open;
+  $('#conv-toggle')?.setAttribute('aria-expanded', String(open));
+  $('#conv-toggle')?.classList.toggle('open', open);
+}
 function buildNav() {
   const nav = $('#tabs');
   nav.replaceChildren();
   let group = '';
   for (const t of TABS) {
     if (t.group !== group) { group = t.group; nav.append(h('div', { class: 'nav-group' }, group)); }
-    nav.append(h('button', { class: 'nav-item', 'data-tab': t.id, 'data-feature': t.feature, 'data-admin': t.admin ? '1' : null, title: t.label }, icon(t.icon), h('span', { class: 'lbl' }, t.label)));
+    const btn = h('button', { class: 'nav-item', 'data-tab': t.id, 'data-feature': t.feature, 'data-admin': t.admin ? '1' : null, title: t.label }, icon(t.icon), h('span', { class: 'lbl' }, t.label));
+    if (t.id !== 'chat') { nav.append(btn); continue; }
+    // Chat: a row with a chevron that drops down the conversation list right under it.
+    const chev = h('button', { id: 'conv-toggle', class: 'chev', title: 'Show or hide conversations', 'aria-label': 'Show or hide conversations', 'aria-expanded': 'false' }, '▾');
+    chev.addEventListener('click', () => { ui.convOpen = !convOpenNow(); saveUi(); applyConvPanel(); });
+    nav.append(h('div', { class: 'nav-row' }, btn, chev), convPanel);
   }
+  applyConvPanel();
   $('#collapse').append(icon('panel'));
   $('#menu').append(icon('menu'));
 }
@@ -490,7 +504,7 @@ function renderConversations() {
     el.append(h('div', { class: 'conv-group' }, g));
     for (const c of sections.get(g)) {
       el.append(h('div', { class: `conv${c.id === convId ? ' active' : ''}`, role: 'listitem', tabindex: '0', title: `${c.title}\n${when(c.updated)} · ${c.count} messages`,
-        onclick: () => openConversation(c.id), onkeydown: (e) => e.key === 'Enter' && openConversation(c.id) },
+        onclick: () => { show('chat'); openConversation(c.id); }, onkeydown: (e) => e.key === 'Enter' && (show('chat'), openConversation(c.id)) },
       pins.has(c.id) ? h('span', { class: 'pin' }, '●') : null, h('span', { class: 't' }, c.title)));
     }
   }
@@ -1499,50 +1513,6 @@ function toggleSidebar() {
 $('#collapse').addEventListener('click', toggleSidebar);
 $('#menu').addEventListener('click', toggleSidebar);
 $('#scrim').addEventListener('click', toggleSidebar);
-
-// ---- Conversation list: resizable and collapsible ----
-const RAIL = { min: 160, max: 520, def: 240 };
-const chatTab = $('#tab-chat');
-const railSplit = $('#rail-split');
-function applyRail() {
-  const w = Math.min(RAIL.max, Math.max(RAIL.min, Number(ui.railW) || RAIL.def));
-  chatTab.style.setProperty('--rail-w', `${w}px`);
-  chatTab.classList.toggle('rail-hidden', !!ui.railHidden);
-  railSplit.setAttribute('aria-valuenow', String(w));
-}
-function setRailWidth(w, persist) {
-  ui.railW = Math.round(Math.min(RAIL.max, Math.max(RAIL.min, w)));
-  applyRail();
-  if (persist) saveUi();
-}
-railSplit.addEventListener('pointerdown', (e) => {
-  e.preventDefault();
-  railSplit.setPointerCapture(e.pointerId);
-  railSplit.classList.add('drag');
-  document.body.classList.add('resizing');
-  const left = $('.rail').getBoundingClientRect().left;
-  const move = (ev) => setRailWidth(ev.clientX - left, false);
-  const up = () => {
-    railSplit.classList.remove('drag');
-    document.body.classList.remove('resizing');
-    railSplit.removeEventListener('pointermove', move);
-    railSplit.removeEventListener('pointerup', up);
-    railSplit.removeEventListener('pointercancel', up);
-    saveUi();
-  };
-  railSplit.addEventListener('pointermove', move);
-  railSplit.addEventListener('pointerup', up);
-  railSplit.addEventListener('pointercancel', up);
-});
-railSplit.addEventListener('dblclick', () => setRailWidth(RAIL.def, true));
-railSplit.addEventListener('keydown', (e) => {
-  const step = e.shiftKey ? 40 : 12;
-  const cur = Number(ui.railW) || RAIL.def;
-  if (e.key === 'ArrowLeft') { e.preventDefault(); setRailWidth(cur - step, true); }
-  else if (e.key === 'ArrowRight') { e.preventDefault(); setRailWidth(cur + step, true); }
-});
-$('#rail-toggle').addEventListener('click', () => { ui.railHidden = !ui.railHidden; saveUi(); applyRail(); });
-applyRail();
 
 // ---- Command palette ----
 let palIdx = 0;

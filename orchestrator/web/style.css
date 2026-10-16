@@ -191,16 +191,15 @@ details.panel p { margin-top: 8px; }
 .term .err { color: #ff8b8b; } .term .ok { color: #7ee2a0; }
 
 /* Chat */
-.rail { width: var(--rail-w, 240px); flex-shrink: 0; background: var(--surface); display: flex; flex-direction: column; min-height: 0; }
-.rail-split { width: 7px; margin: 0 -3px; flex-shrink: 0; cursor: col-resize; position: relative; z-index: 5; touch-action: none; }
-.rail-split::after { content: ""; position: absolute; left: 3px; top: 0; bottom: 0; width: 1px; background: var(--border); transition: background .12s, width .12s; }
-.rail-split:hover::after, .rail-split:focus-visible::after, .rail-split.drag::after { background: var(--accent); width: 3px; left: 2px; }
-.rail-split:focus-visible { outline: 0; }
-#tab-chat.rail-hidden .rail, #tab-chat.rail-hidden .rail-split { display: none; }
-body.resizing { cursor: col-resize; user-select: none; }
-.rail-head { padding: 12px; display: flex; flex-direction: column; gap: 8px; }
-.rail-head .primary { display: flex; align-items: center; justify-content: center; gap: 6px; }
-.conv-list { overflow-y: auto; padding: 0 8px 12px; flex: 1; }
+.nav-row { display: flex; align-items: center; position: relative; }
+.nav-row .nav-item { padding-right: 34px; }
+.chev { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 26px; height: 26px; padding: 0; background: transparent; border-color: transparent; color: var(--muted); transition: transform .15s; }
+.chev:not(.open) { transform: translateY(-50%) rotate(-90deg); }
+.conv-panel { display: flex; flex-direction: column; gap: 6px; margin: 2px 0 6px 12px; padding-left: 8px; border-left: 1px solid var(--border); min-height: 0; max-height: 46vh; }
+.conv-panel > .primary { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 4px 10px; }
+.conv-panel > input { padding: 4px 8px; font-size: 13px; }
+.app.collapsed .conv-panel, .app.collapsed .chev { display: none; }
+.conv-list { overflow-y: auto; padding: 0 0 4px; flex: 1; min-height: 40px; }
 .conv-group { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--faint); padding: 10px 8px 4px; }
 .conv { display: flex; align-items: center; gap: 6px; padding: 7px 10px; border-radius: var(--radius-sm); cursor: pointer; color: var(--muted); }
 .conv:hover { background: var(--surface-2); color: var(--text); }
@@ -296,9 +295,6 @@ dialog::backdrop { background: rgba(10,14,22,.5); backdrop-filter: blur(2px); }
   .app.collapsed { --side-w: 232px; }
   .app.collapsed .lbl, .app.collapsed .brand-text, .app.collapsed .nav-group { display: revert; }
   #collapse { display: none; }
-  #tab-chat.active { flex-direction: column; }
-  .rail { width: auto; max-height: 34vh; border-bottom: 1px solid var(--border); }
-  .rail-split { display: none; }
   .grid-2 { grid-template-columns: 1fr; }
   .page { padding: 14px; }
   .share-row { grid-template-columns: 100px 1fr 70px; }

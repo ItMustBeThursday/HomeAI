@@ -19,6 +19,12 @@
       <span class="ico" data-icon="search"></span><span class="lbl">Search…</span><kbd>Ctrl K</kbd>
     </button>
     <nav id="tabs" class="nav"></nav>
+    <!-- Conversations: moved under the Chat item in the sidebar by buildNav() -->
+    <div id="conv-panel" class="conv-panel" hidden>
+      <button id="new-chat" class="primary block"><span class="ico" data-icon="plus"></span>New chat</button>
+      <input id="conv-search" type="search" placeholder="Filter conversations" aria-label="Filter conversations">
+      <div id="conv-list" class="conv-list" role="list"></div>
+    </div>
     <div class="side-foot">
       <button id="theme-quick" class="nav-item" title="Cycle theme"><span class="ico" data-icon="sun"></span><span class="lbl">Theme</span></button>
       <button data-tab="settings" class="nav-item"><span class="ico" data-icon="sliders"></span><span class="lbl">Settings</span></button>
@@ -37,17 +43,8 @@
     <main>
       <!-- CHAT -->
       <section id="tab-chat" class="tab active">
-        <aside class="rail">
-          <div class="rail-head">
-            <button id="new-chat" class="primary block"><span class="ico" data-icon="plus"></span>New chat</button>
-            <input id="conv-search" type="search" placeholder="Filter conversations" aria-label="Filter conversations">
-          </div>
-          <div id="conv-list" class="conv-list" role="list"></div>
-        </aside>
-        <div id="rail-split" class="rail-split" role="separator" aria-orientation="vertical" aria-label="Resize conversation list (double-click to reset)" tabindex="0" title="Drag to resize, double-click to reset"></div>
         <div class="thread-wrap">
           <div class="thread-head">
-            <button id="rail-toggle" class="ghost sm" title="Show or hide conversations" aria-label="Toggle conversation list">Chats</button>
             <h2 id="conv-title">New chat</h2>
             <span id="conv-meta" class="muted"></span>
             <span class="spacer"></span>

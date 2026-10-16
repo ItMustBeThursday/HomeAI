@@ -20,6 +20,10 @@
       "path": "D:\\HomeAIGit\\HomeAI",
       "description": "Checkout of the public GitHub repo ItMustBeThursday/HomeAI"
     },
+    "system": {
+      "path": "D:\\",
+      "description": "Whole PC: start at the D: drive; the agent can reach every drive (OneDrive excluded)"
+    },
     "companion": {
       "path": "D:\\HomeAI\\projects\\homeai-companion",
       "description": "Desktop, Android and remote companion apps"

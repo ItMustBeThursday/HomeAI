@@ -22,6 +22,7 @@ import { createConnections } from './connections.mjs';
 import { rotateIfLarge } from './rotate.mjs';
 import { createJobs, JOB_SYSTEM } from './jobs.mjs';
 import { createGrants, checkFolder } from './grants.mjs';
+import { createSystemAccess } from './sysaccess.mjs';
 import { startServer } from './server.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -36,6 +37,7 @@ const files = {
   projects: env.HOMEAI_ORCH_PROJECTS ?? join(root, 'config', 'projects.json'),
   connections: env.HOMEAI_ORCH_CONNECTIONS ?? join(root, 'config', 'connections.json'),
   network: env.HOMEAI_ORCH_NETWORK ?? join(root, 'config', 'network.json'),
+  systemAccess: env.HOMEAI_ORCH_SYSACCESS ?? join(root, 'config', 'system-access.json'),
 };
 const dataDir = env.HOMEAI_ORCH_DATA ?? join(root, 'data');
 const scratch = join(dataDir, 'scratch');
@@ -93,8 +95,11 @@ const github = projectsConfig?.github ? createGithub({ repo: projectsConfig.gith
 // Standing folder permissions ("always allow"); every agent run gets these in addition to its project folder.
 const grants = createGrants({ file: join(dataDir, 'grants.json') });
 
+// Whole-machine access (every drive except OneDrive) for agent runs, so the WebUI agent can work anywhere like a desktop agent.
+const systemAccess = createSystemAccess({ config: optionalJson(files.systemAccess, { enabled: false }) });
+
 const orchestrator = createOrchestrator({
-  dirsFor: (o) => grants.dirs(o),
+  dirsFor: (o) => [...new Set([...grants.dirs(o), ...systemAccess.dirs()])],
   config: readJson(files.routes),
   caps: readJson(files.budgets),
   store: createLedgerStore(join(dataDir, 'ledger.jsonl')),
