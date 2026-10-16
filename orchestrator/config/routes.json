@@ -17,7 +17,7 @@
     "planning": { "chain": ["claude-opus", "claude-sonnet", "local-main"], "memory": true },
     "vision": { "chain": ["local-vision", "claude-sonnet"] },
     "plan": { "chain": ["claude-sonnet", "codex"], "agent": true, "readOnly": true, "then": "agent", "maxTurns": 25, "tools": ["Read", "Glob", "Grep"], "memory": true },
-    "agent": { "chain": ["claude-sonnet", "codex"], "agent": true, "maxTurns": 40, "tools": ["Bash", "Read", "Edit", "Write", "Glob", "Grep"], "memory": true }
+    "agent": { "chain": ["claude-sonnet", "codex"], "agent": true, "maxTurns": 40, "tools": ["Bash", "Read", "Edit", "Write", "Glob", "Grep", "WebFetch", "WebSearch"], "memory": true }
   },
   "default": "general"
 }

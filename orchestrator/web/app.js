@@ -325,12 +325,16 @@ async function health() {
 // ---- Config cache ----
 let config = null;
 let whoami = null;
+// Chats on this PC start on the agent route so they can run commands and edit files; limited devices use the default.
+function startRoute() {
+  return config.routes.agent && config.features.shell && whoami?.scopes.includes('admin') ? 'agent' : config.default;
+}
 async function loadConfig() {
   config = await api('/api/config');
   const route = $('#route');
   const prevRoute = route.value;
   route.replaceChildren(...Object.keys(config.routes).map((r) => h('option', { value: r }, r === config.default ? `${r} (default)` : r)));
-  route.value = prevRoute && config.routes[prevRoute] ? prevRoute : config.default;
+  route.value = prevRoute && config.routes[prevRoute] ? prevRoute : startRoute();
   const pin = $('#pin');
   const prevPin = pin.value;
   pin.replaceChildren(h('option', { value: '' }, 'Auto (route chain)'), ...Object.entries(config.connectors).map(([name, c]) => h('option', { value: name }, `${name} — ${c.model}`)));
@@ -506,7 +510,10 @@ async function openConversation(id) {
     if (conv.taskType && config?.routes[conv.taskType]) $('#route').value = conv.taskType;
     msgs = conv.messages.map((m) => ({ ...m }));
     setHead(conv.title);
-  } else setHead('New chat');
+  } else {
+    setHead('New chat');
+    if (config) { $('#route').value = startRoute(); syncProjectPicker(); }
+  }
   renderThread();
   $('#prompt').value = sessionStorage.getItem(draftKey()) ?? '';
   autosize();
