@@ -6,6 +6,12 @@ import { join, normalize, extname, sep } from 'node:path';
 import { timingSafeEqual } from 'node:crypto';
 import { SCOPES } from './access.mjs';
 import { isAffirmation } from './autoroute.mjs';
+import { mediaIntent } from './media-intent.mjs';
+import { checkMediaParams, MEDIA_FILE } from './connectors/comfy.mjs';
+import { readdirSync, statSync } from 'node:fs';
+import { basename as baseName } from 'node:path';
+
+const MEDIA_TYPES = { mp4: 'video/mp4', webm: 'video/webm', mp3: 'audio/mpeg', wav: 'audio/wav', flac: 'audio/flac', png: 'image/png', jpg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif' };
 
 const MAX_BODY = 1_000_000;
 const MAX_BODY_IMAGES = 40_000_000; // chat/task bodies may carry base64 images
@@ -54,21 +60,33 @@ async function userCall(fn) {
   }
 }
 
-// Server-sent events over a POST response. The returned signal aborts if the client disconnects (the Cancel button).
-function openStream(res) {
+// Server-sent events over a POST response. The returned signal aborts when the run is cancelled explicitly
+// (abort()), and also when the client disconnects unless `detach` is set. Chat and task runs are detached:
+// a dropped browser connection must not throw away a model reply that is still being produced; the reply is
+// saved to the conversation and the WebUI loads it. Shell and git streams are not detached.
+function openStream(res, { detach = false } = {}) {
+  res.on('error', () => {}); // a write after the socket died must not crash the service
   res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-store', 'x-accel-buffering': 'no', 'x-content-type-options': 'nosniff' });
   const ctrl = new AbortController();
-  res.on('close', () => {
-    if (!res.writableEnded) ctrl.abort();
-  });
-  const ping = setInterval(() => res.writableEnded || res.write(': ping\n\n'), 15_000);
+  const live = () => !res.destroyed && !res.writableEnded;
+  const write = (text) => {
+    if (!live()) return;
+    try { res.write(text); } catch { /* client gone; the run keeps going if detached */ }
+  };
+  if (!detach) {
+    res.on('close', () => {
+      if (!res.writableEnded) ctrl.abort();
+    });
+  }
+  const ping = setInterval(() => write(': ping\n\n'), 15_000);
   ping.unref();
   return {
     signal: ctrl.signal,
-    send: (obj) => res.writableEnded || res.write(`data: ${JSON.stringify(obj)}\n\n`),
+    abort: () => ctrl.abort(),
+    send: (obj) => write(`data: ${JSON.stringify(obj)}\n\n`),
     end() {
       clearInterval(ping);
-      res.end();
+      if (live()) res.end();
     },
   };
 }
@@ -93,7 +111,7 @@ export function isRemote(req) {
 
 // saveConfig(kind, obj) persists an edit ('routes' | 'budgets'); status(config, opts) checks connector health.
 // auth: createAuth(...) from access.mjs (scoped tokens). token: legacy single bearer token (tests). Neither: open.
-export function createApp({ orchestrator, conversations, scheduler, jobs, grants, saveConfig, status, auth, token, attachments, memory, shell, terminals, github, connections, network = {}, webDir, version = '0.0.0', now = Date.now, tokenFile }) {
+export function createApp({ orchestrator, conversations, scheduler, jobs, grants, saveConfig, status, auth, token, attachments, memory, shell, terminals, github, connections, network = {}, webDir, mediaDir, version = '0.0.0', now = Date.now, tokenFile }) {
   const identify = auth
     ? (h) => auth.identify(h)
     : token
@@ -127,15 +145,22 @@ export function createApp({ orchestrator, conversations, scheduler, jobs, grants
   }
 
   // Runs fn with an SSE stream when the body asks for one; otherwise returns fn's result as plain JSON.
-  async function maybeStream(ctx, body, fn) {
+  // Streams registered under body.runId (a client-made id) can be stopped with POST /api/runs/:id/cancel.
+  const activeRuns = new Map();
+  async function maybeStream(ctx, body, fn, { detach = false } = {}) {
     if (!body.stream) return fn({});
-    const s = openStream(ctx.res);
+    const runId = typeof body.runId === 'string' && /^[A-Za-z0-9_-]{8,80}$/.test(body.runId) ? body.runId : null;
+    if (runId && activeRuns.has(runId)) throw new HttpError(409, 'A run with this id is already in progress');
+    const s = openStream(ctx.res, { detach });
     ctx.streamed = true;
+    if (runId) activeRuns.set(runId, s);
     s.send({ type: 'start' });
     try {
       s.send({ type: 'done', ...(await fn({ signal: s.signal, onEvent: s.send })) });
     } catch (err) {
       s.send({ type: 'error', error: err.message });
+    } finally {
+      if (runId) activeRuns.delete(runId);
     }
     s.end();
     return undefined;
@@ -155,13 +180,14 @@ export function createApp({ orchestrator, conversations, scheduler, jobs, grants
   // ---- read ----
   add('GET', '/api/config', 'read', () => {
     const { connectors, routes: r, default: def, auto } = orchestrator.config;
-    return { connectors, routes: r, default: def, auto, caps: orchestrator.caps, editable: !!saveConfig, features: { shell: !!shell, terminals: !!terminals, memory: !!memory, github: !!github, images: !!attachments, devices: !!auth, connections: !!connections, scheduler: !!scheduler, jobs: !!jobs, access: !!grants } };
+    return { connectors, routes: r, default: def, auto, caps: orchestrator.caps, editable: !!saveConfig, features: { usageReset: true, shell: !!shell, terminals: !!terminals, memory: !!memory, github: !!github, images: !!attachments, devices: !!auth, connections: !!connections, scheduler: !!scheduler, jobs: !!jobs, access: !!grants } };
   });
   add('GET', '/api/usage', 'read', (c) => {
     const hours = Number(c.url.searchParams.get('hours') ?? 24);
     if (!Number.isFinite(hours) || hours <= 0) throw new HttpError(400, 'hours must be a positive number');
     return { hours, ...orchestrator.usage(now() - hours * 3_600_000), caps: orchestrator.capStatus(), window: orchestrator.budgetWindow() };
   });
+  add('POST', '/api/usage/reset', 'admin', () => orchestrator.clearUsage());
   add('GET', '/api/status', 'read', async (c) => need(status, 'Status checks')(orchestrator.config, { fresh: c.url.searchParams.get('fresh') === '1' }));
   add('GET', '/api/history', 'read', (c) => {
     const limit = Number(c.url.searchParams.get('limit') ?? 50);
@@ -229,7 +255,16 @@ export function createApp({ orchestrator, conversations, scheduler, jobs, grants
   add('POST', '/api/task', 'chat', async (c) => {
     const body = await readJson(c.req, MAX_BODY_IMAGES);
     const { images, cwd } = await userCall(() => prepare(c, body, body.taskType));
-    return maybeStream(c, body, (extra) => userCall(() => orchestrator.task({ taskType: body.taskType, prompt: body.prompt, system: body.system, connector: body.connector, images, cwd, ...extra })));
+    // Media settings are checked here so a bad value is an HTTP 400, not a failed run.
+    const params = body.params === undefined ? undefined : checkMediaParams(body.params, { where: 'params' });
+    return maybeStream(c, body, (extra) => userCall(() => orchestrator.task({ taskType: body.taskType, prompt: body.prompt, system: body.system, connector: body.connector, params, images, cwd, ...extra })), { detach: true });
+  });
+  // Explicit Stop: the only thing that aborts a detached chat/task run.
+  add('POST', '/api/runs/:id/cancel', 'chat', async (c) => {
+    const run = activeRuns.get(c.params.id);
+    if (!run) throw new HttpError(404, 'No active run with that id (it may have finished)');
+    run.abort();
+    return { ok: true, cancelled: c.params.id };
   });
   add('POST', '/api/chat', 'chat', async (c) => {
     const body = await readJson(c.req, MAX_BODY_IMAGES);
@@ -250,9 +285,11 @@ export function createApp({ orchestrator, conversations, scheduler, jobs, grants
       }
     }
     // Without a per-message check the route is known now, so permission and project errors return as HTTP errors.
+    const media = !approval && mediaIntent(body.prompt, orchestrator.config);
+    const params = body.params === undefined ? undefined : await userCall(() => checkMediaParams(body.params));
     const early = isAuto && !pendingAuto ? null : await userCall(() => approval
       ? prepare(c, { project: approval.project }, approval.route, conv?.project)
-      : prepare(c, body, body.taskType || conv?.taskType, conv?.project));
+      : prepare(c, body, media?.route || body.taskType || conv?.taskType, conv?.project));
     return maybeStream(c, body, (extra) => userCall(async () => {
       let auto = pendingAuto;
       if (isAuto && !auto) {
@@ -263,10 +300,10 @@ export function createApp({ orchestrator, conversations, scheduler, jobs, grants
       const { images, cwd, project } = early ?? prepare(c, body, auto.route, conv?.project);
       const reply = await orchestrator.chat({
         conversationId: body.conversationId, prompt: approval && pendingAuto ? undefined : body.prompt, taskType: auto ? undefined : body.taskType, connector: body.connector,
-        images, cwd, project, approve: !!approval, auto: approval ? undefined : auto ?? undefined, ...extra,
+        images, cwd, project, params, runId:body.runId, approve: !!approval, auto: approval ? undefined : auto ?? undefined, ...extra,
       });
       return pendingAuto ? { ...reply, reply: { ...reply.reply, auto: { via: pendingAuto.via, reason: pendingAuto.reason, ms: 0 } } } : reply;
-    }));
+    }), { detach: true });
   });
   add('PATCH', '/api/conversations/:id', 'chat', async (c) => {
     const body = await readJson(c.req);
@@ -282,6 +319,27 @@ export function createApp({ orchestrator, conversations, scheduler, jobs, grants
   // Delete = move to data/conversations/trash (restorable). Restore works from archive or trash.
   add('POST', '/api/conversations/:id/trash', 'chat', (c) => userCall(() => (need(conversations, 'Chat').trash(c.params.id), { ok: true, trashed: c.params.id })));
   add('POST', '/api/conversations/:id/restore', 'chat', (c) => userCall(() => ({ ok: true, conversation: need(conversations, 'Chat').restore(c.params.id) })));
+  // Generated media (video, music, images) that ComfyUI wrote into data/media. Names only; no paths leave the server.
+  add('GET', '/api/media', 'read', () => {
+    if (!mediaDir) return { files: [] };
+    let names = [];
+    try { names = readdirSync(mediaDir); } catch { /* folder not created yet */ }
+    const files = names.filter((n) => MEDIA_FILE.test(n)).map((name) => {
+      const st = statSync(join(mediaDir, name));
+      return { name, size: st.size, ts: st.mtimeMs, type: MEDIA_TYPES[name.split('.').pop().toLowerCase()] ?? 'application/octet-stream' };
+    }).filter((f) => f.size > 0).sort((a, b) => b.ts - a.ts).slice(0, 200);
+    return { files };
+  });
+  add('GET', '/api/media/:name', 'read', (c) => {
+    const name = c.params.name;
+    const type = MEDIA_TYPES[(name.split('.').pop() ?? '').toLowerCase()];
+    if (!mediaDir || !MEDIA_FILE.test(name) || baseName(name) !== name || !type) throw new HttpError(404, 'Media file not found');
+    let body;
+    try { body = readFileSync(join(mediaDir, name)); } catch { throw new HttpError(404, 'Media file not found'); }
+    c.res.writeHead(200, { 'content-type': type, 'content-length': body.length, 'cache-control': 'private, max-age=86400', 'x-content-type-options': 'nosniff' });
+    c.res.end(body);
+    c.streamed = true;
+  });
   add('GET', '/api/attachments/:id', 'read', async (c) => {
     const f = await userCall(() => need(attachments, 'Image attachments').file(c.params.id));
     if (!f) throw new HttpError(404, 'Attachment not found');
@@ -400,7 +458,7 @@ export function createApp({ orchestrator, conversations, scheduler, jobs, grants
     } catch {
       throw new HttpError(404, 'Not found');
     }
-    res.writeHead(200, { 'content-type': MIME[extname(file).toLowerCase()] ?? 'application/octet-stream', 'cache-control': 'no-cache', 'x-content-type-options': 'nosniff', 'content-security-policy': "default-src 'self'; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'" });
+    res.writeHead(200, { 'content-type': MIME[extname(file).toLowerCase()] ?? 'application/octet-stream', 'cache-control': 'no-cache', 'x-content-type-options': 'nosniff', 'content-security-policy': "default-src 'self'; img-src 'self' blob: data:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'" });
     res.end(data);
   }
 

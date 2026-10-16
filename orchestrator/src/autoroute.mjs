@@ -1,5 +1,6 @@
 // "auto" chats: a cheap check on every message decides whether to answer (chat), do it (act) or plan it first (plan).
 // Rules decide the obvious cases for free; a small local model decides the rest; a configured fallback covers failures.
+import { mediaIntent } from './media-intent.mjs';
 
 const AFFIRM = /^(?:(?:y|ya|yes|yep|yeah|yup|ok|okay|k|sure|go|go ahead|go for it|do it|do that|proceed|continue|approved?|sounds good|looks good|lgtm|please do|please|ship it|make it so|now|then|thanks?|thank you)[\s.!,]*)+$/i;
 const SMALLTALK = /^(hi|hello|hey|thanks|thank you|thx|cheers|good (morning|afternoon|evening|night)|bye|goodbye|nice|cool|great|awesome|perfect)( there| all| so much| a lot| again| mate| homeai)?[\s.!,]*$/i;
@@ -12,7 +13,13 @@ const ACT_RULES = [
   [/\b[a-z]:\s*(and|&|,|\/)?\s*([a-z]:\s*)?drives?\b|\b[a-z]\s+drive\b/i, 'mentions a drive'],
   [/\b(edit|write|create|modify|change|save|read|open|delete|fix|update|patch|rewrite)\b[^.?!\n]{0,60}\b(files?|code|folders?|director(y|ies)|scripts?|configs?|repo|source)\b/i, 'asks to work with files'],
   [/\byour (own )?(code|source|server|config|files?|settings)\b/i, 'asks about changing itself'],
+  [/\b(try|run|test|execute|launch)\b[^.?!\n]{0,40}\b(shell|powershell|cmd|terminal|command|script|tests?|smoke|connector)\b/i, 'asks to run something'],
+  [/\b(switch|swap)\b[^.?!\n]{0,30}\b(models?|claude|codex|ollama|opus|sonnet|haiku|agent|connector)\b/i, 'asks to switch models'],
+  [/\b(can|could|would|will|please)\s+you\s+(please\s+)?(run|check|test|restart|fix|open|read|edit|write|try|install|update|publish|push|commit)\b|\byou (just |please )?(run|check|test|restart|publish|push|commit|install)\b/i, 'asks it to act'],
 ];
+// A chat reply that says it cannot run or reach anything: a follow-up that is not a question needs the agent.
+const CANT_ACT = /\b(can'?t|cannot|can not|unable to|couldn'?t|could not|no way to)\b[^.!\n]{0,60}\b(run|execute|access|check|restart|touch|read|write|edit|fix|open|reach|start|test|use)\b|\b(in this (chat|session)|from (here|this session))\b/i;
+const QUESTION = /\?\s*$/;
 const PLAN_RULES = [
   /\b(reorgani[sz]e|restructure|re-?arrange|clean ?up|tidy|consolidate|migrate)\b[\s\S]{0,60}\b(folders?|director(y|ies)|files|projects?|layout|structure|workspace|repo)\b/i,
   /\b(move|delete|remove|rename|archive)\s+(all|every|each|the whole|everything)\b/i,
@@ -86,10 +93,17 @@ export function createAutoRouter({ getConfig, run, limiter, loaded, now = Date.n
     const done = (kind, via, reason) => ({ kind, route: kind === 'act' ? auto.act : kind === 'plan' ? auto.plan : chatRoute, via, reason, ms: now() - started });
     const text = String(prompt ?? '').trim();
 
+    const media = mediaIntent(text, config);
+    if (media) return media;
+
     if (!canAct) return done('chat', 'rule', 'this device cannot run commands');
     if (SMALLTALK.test(text)) return done('chat', 'rule', 'small talk');
     if (isAffirmation(text) && (previous?.kind === 'act' || previous?.kind === 'plan')) return done('act', 'rule', 'go-ahead after an action');
     if (withPlan && PLAN_RULES.some((re) => re.test(text))) return done('plan', 'rule', 'bulk or restructuring change');
+    // Mid-conversation: once the agent has been working, a statement or retry ("try now", a pasted error) stays with it.
+    if (previous?.kind === 'act' && !QUESTION.test(text)) return done('act', 'rule', 'follow-up on an action');
+    // A chat reply that said it could not act: the next statement or request is the one that needs the agent.
+    if (previous?.kind === 'chat' && CANT_ACT.test(previous.text ?? '') && !QUESTION.test(text)) return done('act', 'rule', 'follow-up after a reply that could not act');
     for (const [re, why] of ACT_RULES) if (re.test(text)) return done('act', 'rule', why);
 
     const fallback = auto.fallback ?? 'act';

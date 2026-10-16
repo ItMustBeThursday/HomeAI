@@ -1,0 +1,10 @@
+{
+  "1": { "class_type": "CheckpointLoaderSimple", "inputs": { "ckpt_name": "ace_step_1.5_turbo_aio.safetensors" } },
+  "2": { "class_type": "TextEncodeAceStepAudio1.5", "inputs": { "clip": ["1", 1], "tags": "{{tags}}", "lyrics": "{{lyrics}}", "seed": "{{seed}}", "bpm": "{{bpm}}", "duration": "{{seconds}}", "timesignature": "4", "language": "en", "keyscale": "C major", "generate_audio_codes": false, "cfg_scale": 2.0, "temperature": 0.85, "top_p": 0.9, "top_k": 0, "min_p": 0 } },
+  "3": { "class_type": "ConditioningZeroOut", "inputs": { "conditioning": ["2", 0] } },
+  "4": { "class_type": "EmptyAceStep1.5LatentAudio", "inputs": { "seconds": "{{seconds}}", "batch_size": 1 } },
+  "5": { "class_type": "ModelSamplingAuraFlow", "inputs": { "model": ["1", 0], "shift": 3 } },
+  "6": { "class_type": "KSampler", "inputs": { "model": ["5", 0], "seed": "{{seed}}", "steps": "{{steps}}", "cfg": 1, "sampler_name": "euler", "scheduler": "simple", "denoise": 1, "positive": ["2", 0], "negative": ["3", 0], "latent_image": ["4", 0] } },
+  "7": { "class_type": "VAEDecodeAudio", "inputs": { "samples": ["6", 0], "vae": ["1", 2] } },
+  "8": { "class_type": "SaveAudioMP3", "inputs": { "audio": ["7", 0], "filename_prefix": "audio/ace-step-15", "quality": "320k" } }
+}

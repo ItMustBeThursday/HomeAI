@@ -1,6 +1,8 @@
 // HomeAI Orchestrator WebUI. Plain ES module, no build step.
 // Safety rule: model/user text is only ever inserted with textContent or createTextNode, never innerHTML.
 // (The only innerHTML use is the static icon table below.)
+import { setupMedia } from './media.js';
+import { createMediaRenderer, localMediaName } from './media-view.js';
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 const fmt = new Intl.NumberFormat();
@@ -203,7 +205,8 @@ function askToken() {
 }
 
 // ---- Markdown (DOM-built, no innerHTML) ----
-const INLINE = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(__[^_\n]+__)|(~~[^~\n]+~~)|(\*[^*\s][^*\n]*\*)|(\[[^\]\n]+\]\(https?:\/\/[^)\s]+\))|(https?:\/\/[^\s<>)\]]+)/g;
+const mediaView = createMediaRenderer({ h, bootstrapToken, getToken: () => token });
+const INLINE = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(__[^_\n]+__)|(~~[^~\n]+~~)|(\*[^*\s][^*\n]*\*)|(!?\[[^\]\n]*\]\((?:https?:\/\/|\/api\/media\/)[^)\s]+\))|(https?:\/\/[^\s<>)\]]+)/g;
 function inline(text) {
   const out = [];
   let last = 0;
@@ -215,8 +218,9 @@ function inline(text) {
     else if (m[4]) out.push(h('del', {}, inline(s.slice(2, -2))));
     else if (m[5]) out.push(h('em', {}, inline(s.slice(1, -1))));
     else if (m[6]) {
-      const [, label, url] = /^\[([^\]]+)\]\((.+)\)$/.exec(s);
-      out.push(h('a', { href: url, target: '_blank', rel: 'noopener noreferrer' }, label));
+      const [, label, url] = /^!?\[([^\]]*)\]\((.+)\)$/.exec(s);
+      const name = url.startsWith('/api/media/') && localMediaName(url);
+      out.push(name ? mediaView({ name }) : h('a', { href: url, target: '_blank', rel: 'noopener noreferrer' }, label || url));
     } else out.push(h('a', { href: s, target: '_blank', rel: 'noopener noreferrer' }, s));
     last = m.index + s.length;
   }
@@ -278,6 +282,7 @@ function markdown(src) {
 // ---- Navigation ----
 const TABS = [
   { id: 'chat', label: 'Chat', icon: 'chat', group: 'Workspace' },
+  { id: 'media', label: 'Media studio', icon: 'tv', group: 'Workspace' },
   { id: 'jobs', label: 'Jobs', icon: 'queue', group: 'Workspace', feature: 'jobs', admin: true },
   { id: 'overview', label: 'Overview', icon: 'grid', group: 'Workspace' },
   { id: 'terminal', label: 'Terminal', icon: 'terminal', group: 'Build', feature: 'shell', admin: true },
@@ -295,7 +300,7 @@ const TABS = [
 const TITLES = { ...Object.fromEntries(TABS.map((t) => [t.id, t.label])), chats: 'All chats', settings: 'Settings' };
 const SUBS = {
   chat: 'Route-aware conversations', chats: 'Open, archive, delete and restore conversations', jobs: 'Queue work and walk away', overview: 'Everything at a glance', terminal: 'Interactive shells, any folder', projects: 'Tests, git and GitHub',
-  memory: 'Durable facts the models can see', usage: 'Tokens, calls and budgets', history: 'Every task and its fallbacks', status: 'Backend and model health',
+  memory: 'Durable facts the models can see', usage: 'Informational tokens and calls', history: 'Every task and its fallbacks', status: 'Backend and model health',
   schedule: 'Timed jobs and the request queue', config: 'Routes, connectors and budgets', connections: 'Logins for GitHub and other services', devices: 'Tokens for phones and displays', logan: 'Menu catalog (coming)', settings: 'Appearance and shortcuts',
 };
 
@@ -327,6 +332,7 @@ function buildNav() {
 }
 
 const loaders = {};
+loaders.media = setupMedia({ h, api, stream, mediaView });
 let current = 'chat';
 function show(tab) {
   if (!TITLES[tab]) tab = 'chat';
@@ -380,9 +386,22 @@ async function loadConfig() {
   route.value = prevRoute && routeExists(prevRoute) ? prevRoute : startRoute();
   const pin = $('#pin');
   const prevPin = pin.value;
-  pin.replaceChildren(h('option', { value: '' }, 'Auto (route chain)'), ...Object.entries(config.connectors).map(([name, c]) => h('option', { value: name }, `${name} — ${c.model}`)));
+  pin.replaceChildren(h('option', { value: '' }, 'Automatic'), ...Object.entries(config.connectors).map(([name, c]) => h('option', { value: name, title:c.model }, name)));
   pin.value = prevPin && config.connectors[prevPin] ? prevPin : '';
+  syncModels();
   return config;
+}
+function syncModels() {
+  if (!config) return;
+  const route = config.routes[$('#route').value];
+  const media = route?.chain.map(id=>config.connectors[id]).find(c=>c.kind==='comfyui')?.media;
+  for(const option of $('#pin').options) {
+    const c=config.connectors[option.value];
+    option.disabled = !!c && (media ? c.kind!=='comfyui' || c.media!==media : c.kind==='comfyui' || (route?.agent && !['claude-cli','codex-cli'].includes(c.kind)));
+    option.hidden=option.disabled;
+  }
+  if ($('#pin').selectedOptions[0]?.disabled) $('#pin').value='';
+  $('#pin').title='Preferred model. Compatible route models are tried if it is unavailable.';
 }
 
 function applyFeatures() {
@@ -449,19 +468,21 @@ function messageEl(m, index) {
         h('button', { class: 'ghost', onclick: () => copyText(m.text) }, 'Copy'),
         h('button', { class: 'ghost', onclick: () => { $('#prompt').value = m.text; autosize(); $('#prompt').focus(); } }, 'Edit as new')));
   }
-  const body = m.error ? h('p', {}, `No answer: ${m.error}`) : markdown(m.text);
+  const body = m.error ? h('div', { class:'recovery-card', role:'status' }, h('strong', {}, m.cancelled || /^(Stopped|Cancelled)$/.test(m.error) ? 'Request stopped' : 'Let’s get this moving again'), h('p', {}, m.error), m.recovery?.resetAt ? h('p', { class:'muted' }, `Budget resets ${new Date(m.recovery.resetAt).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}.`) : null) : markdown(m.text);
   const prior = msgs.slice(0, index).reverse().find((x) => x.role === 'user');
   // Only the newest plan can be approved (mirrors the server: failed approval runs after it don't count).
   const pendingPlan = m.plan && !m.error && index === pendingPlanIndex();
   const wrap = h('div', { class: `m bot${m.error ? ' error' : ''}${m.plan ? ' plan' : ''}` },
-    h('div', { class: 'bubble' }, m.plan ? h('div', { class: 'plan-tag' }, `Plan${m.project ? ` · ${m.project}` : ''} — nothing has been changed yet`) : null, body, m.text && m.error ? markdown(m.text) : null),
+    h('div', { class: 'bubble' }, m.plan ? h('div', { class: 'plan-tag' }, `Plan${m.project ? ` · ${m.project}` : ''} — nothing has been changed yet`) : null, body, m.text && m.error ? markdown(m.text) : null,
+      m.files?.length ? h('div', { class:'inline-media' }, m.files.map(mediaView)) : null,
+      m.error && m.attempts?.length ? h('details', { class:'attempt-details' }, h('summary', {}, 'Attempt details'), m.attempts.map(a => h('p', {}, `${a.connector}: ${a.skipped || a.error || 'Completed'}`))) : null),
     ui.showMeta ? botMeta(m) : null,
     pendingPlan ? h('div', { class: 'plan-acts' },
       h('button', { class: 'primary', onclick: () => approvePlan() }, 'Approve & run'),
       h('span', { class: 'muted' }, 'or reply below to change the plan. Text in the box is sent as extra instructions when you approve.')) : null,
     h('div', { class: 'acts' },
       m.text ? h('button', { class: 'ghost', onclick: () => copyText(m.text) }, 'Copy') : null,
-      prior ? h('button', { class: 'ghost', onclick: () => (prior.approved ? approvePlan() : send(prior.text)) }, 'Retry') : null));
+      prior ? h('button', { class: 'ghost', onclick: () => (prior.approved ? approvePlan() : send(m.error ? 'Please resume the interrupted task. Check current state and continue from the saved request and activity.' : prior.text)) }, m.error ? 'Resume task' : 'Retry') : null));
   return wrap;
 }
 function pendingPlanIndex() {
@@ -552,12 +573,28 @@ async function openConversation(id) {
   if (sending) return toast('Wait for the current reply or press Stop', 'bad');
   sessionStorage.setItem(draftKey(), $('#prompt').value);
   convId = id;
+  if (id) localStorage.setItem('homeai-last-conversation', id); else localStorage.removeItem('homeai-last-conversation');
   msgs = [];
   if (id) {
     const conv = await api(`/api/conversations/${encodeURIComponent(id)}`);
     if (conv.taskType && routeExists(conv.taskType)) { $('#route').value = conv.taskType; syncProjectPicker(); }
     msgs = conv.messages.map((m) => ({ ...m }));
     setHead(conv.title);
+    if (conv.run?.status === 'running') {
+      // Refresh/reopen observes the detached run instead of starting another one.
+      const started = conv.run.started;
+      const poll = async () => {
+        if (convId !== id) return;
+        const saved = await api(`/api/conversations/${encodeURIComponent(id)}`).catch(() => null);
+        // A restart can make several polls fail. Keep observing the same saved run.
+        if (!saved) return setTimeout(poll, 3000);
+        if (convId !== id) return;
+        if (saved.run?.status === 'running' && saved.run.started === started) return setTimeout(poll, 3000);
+        msgs = saved.messages.map(m => ({...m})); renderThread(); loadConversations();
+      };
+      setTimeout(poll, 3000);
+      toast('Your saved request is still running. Its reply will appear here.');
+    }
   } else {
     setHead('New chat');
     if (config) { $('#route').value = startRoute(); syncProjectPicker(); }
@@ -822,7 +859,25 @@ $('#prompt').addEventListener('keydown', (e) => {
 
 // ---- Streaming send ----
 let chatAbort = null;
-$('#stop').addEventListener('click', () => chatAbort?.abort());
+let activeRunId = null;
+// Stop asks the service to cancel the run (the server keeps running a chat when the connection drops, so Stop must be explicit).
+$('#stop').addEventListener('click', () => {
+  if (activeRunId) api(`/api/runs/${encodeURIComponent(activeRunId)}/cancel`, { method: 'POST', body: {} }).catch(() => {});
+  chatAbort?.abort();
+});
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// Waits for the service to save the reply after the connection dropped. Resolves with the conversation, or null after the limit.
+async function awaitSavedReply(id, since, status) {
+  const deadline = Date.now() + 35 * 60_000;
+  while (Date.now() < deadline) {
+    await sleep(3000);
+    const conv = await api(`/api/conversations/${encodeURIComponent(id)}`).catch(() => null);
+    const last = conv?.messages?.at(-1);
+    if (last?.role === 'assistant' && last.ts >= since) return conv;
+    status.textContent = 'Connection to the service dropped. Still waiting for the reply to be saved…';
+  }
+  return null;
+}
 
 // approve: run the pending plan; text (optional) is sent as extra instructions.
 async function send(text, { approve = false } = {}) {
@@ -853,7 +908,9 @@ async function send(text, { approve = false } = {}) {
   thread.append(messageEl(userMsg, msgs.length - 1));
 
   // Live bubble: deltas stream in as markdown; tool use and fallbacks appear as status lines.
-  const tools = h('div', { class: 'tools' });
+  const toolList = h('div', { class:'tools' });
+  const toolSummary = h('summary', {}, 'Activity');
+  const tools = h('details', { class:'tool-activity', hidden:true }, toolSummary, toolList);
   const body = h('div', {}, h('span', { class: 'typing' }, h('i'), h('i'), h('i')));
   const status = h('div', { class: 'meta' }, 'Starting…');
   const live = h('div', { class: 'm bot live' }, h('div', { class: 'bubble' }, tools, body), status);
@@ -865,23 +922,30 @@ async function send(text, { approve = false } = {}) {
   const started = Date.now();
   const tick = setInterval(() => ($('#busy').textContent = secs(Date.now() - started)), 250);
   chatAbort = new AbortController();
+  const runId = (crypto.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`);
+  activeRunId = runId;
+  const wasNew = !convId;
+  const sentAt = Date.now();
+  let reached = false; // true once the service has answered; before that a failure means nothing was saved
   try {
     const req = approve
-      ? { conversationId: convId, approve: true, prompt: text || undefined, connector: $('#pin').value || undefined }
+      ? { conversationId: convId, approve: true, prompt: text || undefined, connector: $('#pin').value || undefined, runId }
       : {
-          conversationId: convId ?? undefined, prompt: text, taskType: $('#route').value, connector: $('#pin').value || undefined,
+          conversationId: convId ?? undefined, prompt: text, taskType: $('#route').value, connector: $('#pin').value || undefined, runId,
           images: images.length ? images : undefined, project: $('#project-label').hidden ? undefined : $('#project').value || undefined,
         };
     const r = await stream('/api/chat', req, (ev) => {
-      if (ev.type === 'routing') status.textContent = 'Checking what this needs…';
+      reached = true;
+      if (ev.type === 'conversation') { convId = ev.id; localStorage.setItem('homeai-last-conversation', convId); }
+      else if (ev.type === 'routing') status.textContent = 'Checking what this needs…';
       else if (ev.type === 'routed') status.textContent = `${routedLabel(ev)} · ${ev.reason}…`;
-      else if (ev.type === 'attempt') { acc = ''; tools.replaceChildren(); status.textContent = `${ev.connector} · ${ev.model}…`; paint(); }
+      else if (ev.type === 'attempt') { acc = ''; toolList.replaceChildren(); tools.hidden=true; status.textContent = `${ev.connector} · ${ev.model}…`; paint(); }
       else if (ev.type === 'delta') { acc += ev.text; if (!raf) raf = requestAnimationFrame(paint); }
-      else if (ev.type === 'tool') { tools.append(h('div', { class: 'tool' }, `${ev.name}${ev.summary ? `: ${ev.summary}` : ''}`)); scrollDown(); }
+      else if (ev.type === 'tool') { tools.hidden=false; toolList.append(h('div', { class: 'tool' }, `${ev.name}${ev.summary ? `: ${ev.summary}` : ''}`)); toolSummary.textContent=`Activity · ${toolList.children.length} steps`; scrollDown(); }
+      else if (ev.type === 'attempt-skipped') status.textContent = `${ev.connector} unavailable within current limits; checking alternatives…`;
       else if (ev.type === 'attempt-failed') status.textContent = `${ev.connector} failed (${ev.error}); trying next…`;
     }, chatAbort.signal);
     live.remove();
-    const isNew = !convId;
     convId = r.conversation.id;
     msgs.push({ role: 'assistant', ...r.reply });
     thread.append(messageEl(msgs.at(-1), msgs.length - 1));
@@ -889,17 +953,42 @@ async function send(text, { approve = false } = {}) {
     pending = [];
     renderAttachments();
     await loadConversations();
-    setHead(isNew ? r.conversation.title : $('#conv-title').textContent);
+    setHead(wasNew ? r.conversation.title : $('#conv-title').textContent);
   } catch (err) {
-    live.remove();
     const stopped = err.name === 'AbortError';
-    const m = { role: 'assistant', error: stopped ? 'Stopped' : err.message, ...(acc ? { text: acc } : {}) };
-    msgs.push(m);
-    thread.append(messageEl(m, msgs.length - 1));
-    scrollDown(true);
-    if (!stopped) $('#prompt').value = text;
-    autosize();
+    const dropped = !stopped && reached && (err.name === 'TypeError' || /Stream ended without a result/.test(err.message));
+    if (dropped) {
+      // The service keeps the run going and saves the reply. Wait for it instead of showing an error or re-sending.
+      let saved = null;
+      if (convId) {
+        status.textContent = 'Connection to the service dropped. Waiting for the reply to be saved…';
+        saved = await awaitSavedReply(convId, sentAt, status).catch(() => null);
+      }
+      live.remove();
+      if (saved) {
+        msgs = saved.messages.map((m) => ({ ...m }));
+        renderThread();
+        setHead(saved.title);
+        await loadConversations();
+      } else {
+        const m = { role: 'assistant', error: convId ? 'Lost the connection to the service and no reply was saved within 35 minutes. Open this chat from the list to check.' : 'Lost the connection to the service before the chat was created. Check the chat list.' };
+        msgs.push(m);
+        thread.append(messageEl(m, msgs.length - 1));
+        scrollDown(true);
+      }
+      await loadConversations().catch(() => {});
+    } else {
+      live.remove();
+      const m = { role: 'assistant', error: stopped ? 'Stopped' : (reached ? err.message : `Could not reach the service: ${err.message}`), ...(acc ? { text: acc } : {}) };
+      msgs.push(m);
+      thread.append(messageEl(m, msgs.length - 1));
+      scrollDown(true);
+      // Put the prompt back so it can be resent (a dropped connection never reaches this branch, so nothing is sent twice).
+      if (!stopped) $('#prompt').value = text;
+      autosize();
+    }
   } finally {
+    activeRunId = null;
     cancelAnimationFrame(raf);
     clearInterval(tick);
     chatAbort = null;
@@ -913,6 +1002,7 @@ async function send(text, { approve = false } = {}) {
 $('#composer').addEventListener('submit', (e) => { e.preventDefault(); send($('#prompt').value); });
 
 function syncProjectPicker() {
+  syncModels();
   const r = $('#route').value;
   const agent = r === 'auto' ? !!config?.auto && canAct() : !!config?.routes[r]?.agent;
   $('#project-label').hidden = !agent || !config?.features.shell;
@@ -947,20 +1037,8 @@ loaders.chat = async () => {
 async function statusCard(k, v, d, cls = '') {
   return h('div', { class: `card ${cls}` }, h('div', { class: 'k' }, k), h('div', { class: 'v' }, v), d ? h('div', { class: 'd' }, d) : null);
 }
-function capBar(c) {
-  const pct = c.limit ? Math.min(100, (100 * c.used) / c.limit) : 100;
-  return h('div', { class: `bar ${pct >= 100 ? 'bad' : pct >= 80 ? 'warn' : ''}` }, h('span', { style: `width:${pct}%` }));
-}
-// Budgets reset in fixed blocks (see config/budgets.json "window"); show which block we are in and when it resets.
-const clock = (ms) => new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-function blockNote(w) {
-  if (!w) return null;
-  const mins = Math.max(0, Math.round((w.end - Date.now()) / 60000));
-  return h('p', { class: 'muted' }, `Current block ${clock(w.start)}–${clock(w.end)} · resets in ${Math.floor(mins / 60)}h ${mins % 60}m`);
-}
 function capList(u) {
-  if (!u.caps.length) return h('p', { class: 'muted' }, 'No budgets configured.');
-  return h('div', {}, blockNote(u.window), h('div', { class: 'share' }, u.caps.map((c) => h('div', { class: 'share-row' }, h('span', { class: 'nm', title: `${c.scope} ${c.name} · ${c.metric}` }, `${c.name} · ${c.metric}`), capBar(c), h('span', { class: 'val' }, `${n(c.used)} / ${n(c.limit)}`)))));
+  return h('p', { class: 'muted' }, 'Usage counters are informational. Model access is never blocked by local counters. Clear usage resets counters without deleting history.');
 }
 loaders.overview = async () => {
   const [u, s, hist] = await Promise.all([api('/api/usage?hours=24'), api('/api/status').catch(() => null), api('/api/history?limit=8').catch(() => ({ tasks: [] }))]);
@@ -1016,6 +1094,17 @@ loaders.usage = async () => {
 };
 $('#usage-hours').addEventListener('change', () => loaders.usage());
 $('#usage-refresh').addEventListener('click', () => loaders.usage());
+
+$('#usage-clear').addEventListener('click', async () => {
+  const button = $('#usage-clear');
+  button.disabled = true;
+  try {
+    await api('/api/usage/reset', { method: 'POST' });
+    await loaders.usage();
+    toast('Usage cleared. Chat history preserved.');
+  } catch (e) { toast(e.message, 'bad'); }
+  finally { button.disabled = false; }
+});
 
 // ---- History ----
 let historyCache = [];
@@ -1795,4 +1884,6 @@ setInterval(health, 30_000);
   applyFeatures();
   const start = location.hash.slice(1);
   show(TITLES[start] ? start : 'chat');
+  const lastChat = localStorage.getItem('homeai-last-conversation');
+  if ((!start || start === 'chat') && lastChat) await openConversation(lastChat).catch(() => toast('Your last chat is saved. Reopen it when the service reconnects.', 'bad'));
 })();

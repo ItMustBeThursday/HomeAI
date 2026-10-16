@@ -101,6 +101,34 @@ test('without a plan route, PLAN answers become act and the plan rule is off', a
   assert.equal(parseVerdict('nothing', true), null);
 });
 
+test('mid-conversation: retries and pasted output after an action stay with the agent', async () => {
+  const { decide, calls } = router({ ok: true, text: 'CHAT' });
+  const after = { kind: 'act', text: 'Still blocked: helper_unknown_error: setup refresh had errors.' };
+  for (const prompt of ['ok try now', 'RuntimeAclFailure : False  AccessDenied : True', 'you should be able to switch models dynamically', 'try again']) {
+    const d = await decide({ prompt, previous: after });
+    assert.deepEqual([prompt, d.kind, d.via], [prompt, 'act', 'rule']);
+  }
+  assert.equal(calls.length, 0);
+  // A real question after an action is still checked, not forced onto the agent.
+  assert.equal((await decide({ prompt: 'why is it still blocked?', previous: after })).via, 'model');
+  // Shell and model-switching requests are actions even with no earlier turn.
+  assert.equal((await decide({ prompt: 'can you try to write to the shell now plz' })).reason, 'asks to run something');
+  assert.equal((await decide({ prompt: 'switch to claude and try again' })).kind, 'act');
+  assert.equal((await decide({ prompt: 'ok, you run the codex checkj' })).reason, 'asks it to act');
+  assert.equal((await decide({ prompt: 'can you explain what a sandbox is' })).via, 'model');
+});
+
+test('mid-conversation: a chat reply that said it could not act hands the next statement to the agent', async () => {
+  const { decide, calls } = router({ ok: true, text: 'CHAT' });
+  const cant = { kind: 'chat', text: "I can't run the Codex check from this session, so I can't confirm it." };
+  const d = await decide({ prompt: 'you misunderstand, we are running it from this orchestrator', previous: cant });
+  assert.deepEqual([d.kind, d.via], ['act', 'rule']);
+  assert.equal((await decide({ prompt: 'why?', previous: cant })).via, 'model');
+  // A plain chat answer that did not refuse is still checked by the model.
+  assert.equal((await decide({ prompt: 'and what about tomorrow?', previous: { kind: 'chat', text: 'Sure, it is sunny.' } })).via, 'model');
+  assert.equal(calls.length, 2);
+});
+
 test('affirmations', () => {
   for (const s of ['yes', 'Yes please', 'go ahead', 'ok, do it', 'Approved.', 'sounds good!', 'yes, go ahead']) assert.ok(isAffirmation(s), s);
   for (const s of ['yes but rename it first', 'no', 'go ahead and delete everything in C:\\']) assert.ok(!isAffirmation(s), s);

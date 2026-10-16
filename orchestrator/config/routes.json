@@ -40,6 +40,85 @@
     "local-giant": {
       "kind": "ollama",
       "model": "homeai-giant:locked"
+    },
+    "video-wan-fp8": {
+      "kind": "comfyui",
+      "model": "Wan 2.2 TI2V-5B (fp16 weights cast to fp8, tested)",
+      "workflow": "wan22-ti2v-5b-fp8cast.json",
+      "media": "video",
+      "defaults": {
+        "frames": 49,
+        "width": 640,
+        "height": 352,
+        "steps": 20,
+        "cfg": 5,
+        "fps": 24
+      }
+    },
+    "video-wan-q4": {
+      "kind": "comfyui",
+      "model": "Wan 2.2 TI2V-5B GGUF Q4_K_M (tested)",
+      "workflow": "wan22-ti2v-5b-q4.json",
+      "media": "video",
+      "defaults": {
+        "frames": 49,
+        "width": 640,
+        "height": 352,
+        "steps": 20,
+        "cfg": 5,
+        "fps": 24
+      }
+    },
+    "video-wan-q8": {
+      "kind": "comfyui",
+      "model": "Wan 2.2 TI2V-5B GGUF Q8_0 (tested)",
+      "workflow": "wan22-ti2v-5b-q8.json",
+      "media": "video",
+      "defaults": {
+        "frames": 49,
+        "width": 640,
+        "height": 352,
+        "steps": 20,
+        "cfg": 5,
+        "fps": 24
+      }
+    },
+    "video-hunyuan15-480p": {
+      "kind": "comfyui",
+      "model": "HunyuanVideo 1.5 480p t2v cfg-distilled fp8 (UNTESTED workflow)",
+      "workflow": "hunyuan15-480p-t2v-fp8.json",
+      "media": "video",
+      "defaults": {
+        "frames": 49,
+        "width": 640,
+        "height": 352,
+        "steps": 20,
+        "cfg": 1,
+        "fps": 24
+      }
+    },
+    "music-ace-step-15": {
+      "kind": "comfyui",
+      "model": "ACE-Step 1.5 turbo (tested)",
+      "workflow": "ace-step-15-turbo.json",
+      "media": "audio",
+      "defaults": {
+        "seconds": 30,
+        "steps": 8,
+        "bpm": 110
+      }
+    },
+    "image-sdxl-turbo": {
+      "kind": "comfyui",
+      "model": "SDXL Turbo fp16 (local)",
+      "workflow": "sdxl-turbo.json",
+      "media": "image",
+      "defaults": {
+        "width": 512,
+        "height": 512,
+        "steps": 4,
+        "cfg": 1
+      }
     }
   },
   "routes": {
@@ -135,6 +214,22 @@
         "claude-opus"
       ],
       "memory": true
+    },
+    "video": {
+      "chain": [
+        "video-wan-fp8",
+        "video-wan-q4"
+      ]
+    },
+    "music": {
+      "chain": [
+        "music-ace-step-15"
+      ]
+    },
+    "image": {
+      "chain": [
+        "image-sdxl-turbo"
+      ]
     }
   },
   "auto": {

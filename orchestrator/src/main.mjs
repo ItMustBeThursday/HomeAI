@@ -13,6 +13,8 @@ import { createLimiter } from './limiter.mjs';
 import { createScheduler } from './scheduler.mjs';
 import { createAttachmentStore } from './attachments.mjs';
 import { createMemoryStore } from './memory.mjs';
+import { createOllamaEmbedder } from './embedder.mjs';
+import { createComfyRunner, COMFY_URL } from './connectors/comfy.mjs';
 import { createAuth, loadOrCreateToken } from './access.mjs';
 import { createShell } from './shell.mjs';
 import { createTerminals } from './terminal.mjs';
@@ -38,6 +40,7 @@ const files = {
   connections: env.HOMEAI_ORCH_CONNECTIONS ?? join(root, 'config', 'connections.json'),
   network: env.HOMEAI_ORCH_NETWORK ?? join(root, 'config', 'network.json'),
   systemAccess: env.HOMEAI_ORCH_SYSACCESS ?? join(root, 'config', 'system-access.json'),
+  workflows: env.HOMEAI_ORCH_WORKFLOWS ?? join(root, 'config', 'workflows'),
 };
 const dataDir = env.HOMEAI_ORCH_DATA ?? join(root, 'data');
 const scratch = join(dataDir, 'scratch');
@@ -55,13 +58,19 @@ const run = createRunner({
   claudeBin,
   codexScript,
   ollamaUrl,
+  // ComfyUI (local image/video/music). Outputs land in data/media.
+  comfyRun: createComfyRunner({ baseUrl: env.HOMEAI_COMFY_URL ?? COMFY_URL, workflowDir: files.workflows, outDir: join(dataDir, 'media'), readFile: readFileSync }),
   // Empty working dir so the CLIs don't pick up project instructions from wherever the service was started.
   cwd: scratch,
 });
 
 const conversations = createConversationStore(join(dataDir, 'conversations'));
+const recovered = conversations.recoverInterrupted();
+if (recovered) console.log(`Recovered ${recovered} interrupted conversation(s); saved context is ready to resume.`);
 const attachments = createAttachmentStore(join(dataDir, 'attachments'));
-const memory = createMemoryStore(join(dataDir, 'memory'));
+// Semantic memory search uses the local embedding model; keyword search is the fallback.
+const embedUrl = new URL('/api/embed', new URL(ollamaUrl ?? OLLAMA_URL).origin).href;
+const memory = createMemoryStore(join(dataDir, 'memory'), { embedder: createOllamaEmbedder({ model: env.HOMEAI_EMBED_MODEL ?? 'homeai-embedding:locked', url: embedUrl }) });
 
 // Shell/project access exists only when config/projects.json does.
 const projectsConfig = optionalJson(files.projects, null);
@@ -99,6 +108,10 @@ const grants = createGrants({ file: join(dataDir, 'grants.json') });
 const systemAccess = createSystemAccess({ config: optionalJson(files.systemAccess, { enabled: false }) });
 
 const orchestrator = createOrchestrator({
+  workspaceContext: () => ['RESUME.md', 'USER.md', 'SOUL.md'].map(name => {
+    const path = join('D:/HomeAI/workspace', name);
+    return existsSync(path) ? `Owner-maintained context (${name}; verify observations before acting):\n${readFileSync(path,'utf8').slice(0,6000)}` : '';
+  }).filter(Boolean).join('\n\n'),
   // Codex's Windows sandbox must add an ACE to every --add-dir root and aborts the whole run if any fails
   // (C:\Windows, D:\ etc. always fail without admin), so Codex gets explicit grants only, not whole-machine dirs.
   dirsFor: (o) => [...new Set([...grants.dirs(o), ...(o?.kind === 'codex-cli' ? [] : systemAccess.dirs())])],
@@ -110,7 +123,7 @@ const orchestrator = createOrchestrator({
   memory,
   run,
   // One request at a time per Ollama GPU; two at a time per CLI so parallel calls queue instead of thrashing.
-  limiter: createLimiter({ limits: { ollama: 1, 'claude-cli': 2, 'codex-cli': 2 } }),
+  limiter: createLimiter({ limits: { ollama: 1, comfyui: 1, 'claude-cli': 2, 'codex-cli': 2 } }),
   loadedModels: async () => {
     const res = await fetch(`${new URL(ollamaUrl ?? OLLAMA_URL).origin}/api/ps`, { signal: AbortSignal.timeout(1000) });
     return new Set(((await res.json()).models ?? []).map((m) => m.name));
@@ -158,7 +171,7 @@ const jobs = createJobs({
 });
 jobs.start();
 const writeConfig = createConfigWriter(join(dataDir, 'config-backups'));
-const status = createStatusChecker({ ollamaBase: ollamaUrl ? new URL(ollamaUrl).origin : undefined, claudeBin, codexScript });
+const status = createStatusChecker({ ollamaBase: ollamaUrl ? new URL(ollamaUrl).origin : undefined, comfyBase: env.HOMEAI_COMFY_URL ?? COMFY_URL, claudeBin, codexScript });
 
 // Access: an admin token is always required (auto-created in data/token.txt); devices get limited tokens.
 const tokenFile = join(dataDir, 'token.txt');
@@ -187,6 +200,7 @@ await startServer({
   saveConfig: (kind, obj) => writeConfig(files[kind], obj),
   status,
   webDir: join(root, 'web'),
+  mediaDir: join(dataDir, 'media'),
   version,
 }, { port, host });
 process.stdout.write(`HomeAI orchestrator ${version} listening on http://${host}:${port} (codex: ${codexScript})\n`);

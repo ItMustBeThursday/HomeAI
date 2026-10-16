@@ -49,12 +49,16 @@ Local data (never goes to GitHub; back it up with `scripts/backup-data.ps1`):
 | GET | `/api/schedule` | scheduler on/off, jobs with last run, and the request queue per backend |
 | POST | `/api/schedule/run` | `{name}` run a job now (works even when the scheduler is off) |
 | GET | `/api/history?limit=50` | recent tasks, newest first |
-| POST | `/api/task` | `{taskType?, prompt, system?, connector?}` → `{id, ok, text, connector, model, taskType, attempts[], ms}`; `connector` pins one model |
+| POST | `/api/task` | `{taskType?, prompt, system?, connector?}` → `{id, ok, text, connector, model, taskType, attempts[], ms}`; `connector` is preferred first, with compatible route fallbacks |
 | POST | `/api/chat` | `{conversationId?, prompt, taskType?, connector?}` → `{conversation, reply}`; omitting the id starts a new chat |
 | GET | `/api/conversations` | chat list |
 | GET/PATCH/DELETE | `/api/conversations/:id` | read; rename `{title}`; archive (moved, not deleted) |
 
 ## How it behaves
+- Preferred models fall back to compatible models from the configured route when a provider fails. Usage counters are informational and never block execution. Cancellation never falls through. Action routes require tool-capable CLIs; media fallbacks retain the selected media type.
+- Failed routes return a readable recovery message and attempt details. These details and media file references persist in the conversation. Admins can use **Clear usage** (`POST /api/usage/reset`) to reset counters while retaining the ledger and chats.
+- The Video & music studio and chat share inline video, audio and image cards. Visible previews load through authenticated requests with local blob URLs; tokens never appear in links. The library has format filters and loads up to twelve cards at a time. Settings stay in a disclosure panel until needed.
+- `scripts/restart-when-idle.ps1` queues a detached, one-time watcher that waits for idle model queues before invoking the existing scheduled-task restart script. It writes health/config verification to `D:\HomeAI\logs\webui-reload.log`.
 - Prompts reach the CLIs over stdin, never on the command line.
 - `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` and `OPENAI_API_KEY` are removed from the child environment, so the CLIs use subscription logins rather than metered API billing.
 - CLIs run in an empty `data/scratch` directory so they don't load stray project instructions.

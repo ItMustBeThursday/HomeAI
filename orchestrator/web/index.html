@@ -7,6 +7,7 @@
   <title>HomeAI</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%234f6bed'/%3E%3Ctext x='16' y='22.5' font-family='Arial' font-weight='700' font-size='19' text-anchor='middle' fill='white'%3EH%3C/text%3E%3C/svg%3E">
   <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="polish.css">
 </head>
 <body>
 <div id="app" class="app">
@@ -57,11 +58,13 @@
             <h2 id="conv-title">New chat</h2>
             <span id="conv-meta" class="muted"></span>
             <span class="spacer"></span>
+            <details class="chat-actions"><summary aria-label="Conversation actions">Actions</summary><div class="chat-action-menu">
             <button id="pin-chat" class="ghost sm" hidden>Pin</button>
             <button id="export-chat" class="ghost sm" hidden>Export</button>
             <button id="rename-chat" class="ghost sm" hidden>Rename</button>
             <button id="archive-chat" class="ghost sm" hidden>Archive</button>
             <button id="delete-chat" class="ghost sm danger" hidden>Delete</button>
+            </div></details>
           </div>
           <div class="thread-scroll">
             <div id="thread" class="thread" aria-live="polite"></div>
@@ -69,7 +72,7 @@
           </div>
           <form id="composer" class="composer">
             <div id="attach-strip" class="attach-strip" hidden></div>
-            <textarea id="prompt" rows="1" placeholder="Message HomeAI…   (Enter to send · Shift+Enter newline · / for commands)" required></textarea>
+            <textarea id="prompt" rows="1" aria-label="Message HomeAI" placeholder="Message HomeAI..." required></textarea>
             <div id="slash-menu" class="slash-menu" hidden></div>
             <div class="composer-row">
               <label class="sel">Route <select id="route"></select></label>
@@ -107,7 +110,7 @@
         <div id="ov-cards" class="cards"></div>
         <div class="grid-2">
           <div class="panel"><div class="panel-head"><h3>Backends</h3><button id="ov-refresh" class="ghost sm">Refresh</button></div><div id="ov-backends"></div></div>
-          <div class="panel"><div class="panel-head"><h3>Budgets, this 5-hour block</h3></div><div id="ov-caps"></div></div>
+          <div class="panel"><div class="panel-head"><h3>Usage references (informational)</h3></div><div id="ov-caps"></div></div>
         </div>
         <div class="grid-2">
           <div class="panel"><div class="panel-head"><h3>Recent activity</h3><button class="ghost sm" data-go="history">All history</button></div><div id="ov-recent"></div></div>
@@ -178,10 +181,11 @@
       <section id="tab-usage" class="tab page">
         <div class="toolbar">
           <label class="sel">Window <select id="usage-hours"><option value="24">Last 24 hours</option><option value="168">Last 7 days</option><option value="720">Last 30 days</option></select></label>
+          <button id="usage-clear" class="ghost sm" data-feature="usageReset" data-admin="true" hidden>Clear usage</button>
           <button id="usage-refresh" class="ghost sm">Refresh</button>
         </div>
         <div id="usage-totals" class="cards"></div>
-        <div class="panel"><div class="panel-head"><h3>Budgets, this 5-hour block</h3></div><div id="usage-caps"></div></div>
+        <div class="panel"><div class="panel-head"><h3>Usage references (informational)</h3></div><div id="usage-caps"></div></div>
         <div class="grid-2 mt">
           <div class="panel"><div class="panel-head"><h3>By model</h3></div><div id="usage-conn"></div></div>
           <div class="panel"><div class="panel-head"><h3>By route</h3></div><div id="usage-route"></div></div>
@@ -247,7 +251,7 @@
             <div class="panel-head"><h3>Budgets <small>config/budgets.json</small></h3><span id="dirty-budgets" class="pill warn" hidden>unsaved</span></div>
             <textarea id="cfg-budgets" class="code editor" spellcheck="false"></textarea>
             <div class="row mt"><button id="save-budgets" class="primary">Save budgets</button><button id="fmt-budgets" class="ghost sm">Format</button><button id="reset-budgets" class="ghost sm">Revert</button><span id="msg-budgets" class="msg"></span></div>
-            <p class="muted">Shape: <code>{"window": {"hours": 5, "resetAt": "08:00"}, "caps": {"globalTokens": n, "perConnector": {"name": {"tokens": n, "calls": n}}, "perTaskType": {"route": {…}}}}</code>. Caps apply per block: blocks of <code>hours</code> start at <code>resetAt</code> (local time) each day, and the last one is cut at the next reset.</p>
+            <p class="muted">Shape: <code>{"window": {"hours": 5, "resetAt": "08:00"}, "caps": {"globalTokens": n, "perConnector": {"name": {"tokens": n, "calls": n}}, "perTaskType": {"route": {…}}}}</code>. These references never block model use. Usage is grouped per block: blocks of <code>hours</code> start at <code>resetAt</code> (local time) each day, and the last one is cut at the next reset.</p>
           </div>
         </div>
       </section>

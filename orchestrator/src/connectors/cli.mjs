@@ -103,7 +103,8 @@ export function parseClaudeJson(stdout) {
 export function buildCodexArgs({ prompt, model, sandbox = 'read-only', stdinPrompt = false, images = [], cwd, addDirs = [], network = false } = {}) {
   if (!stdinPrompt) need(prompt, 'prompt');
   need(model, 'model');
-  if (!['read-only', 'workspace-write'].includes(sandbox)) throw new Error(`Unsupported codex sandbox "${sandbox}"`);
+  // danger-full-access: approved by Adam 2026-10-16 for Codex write/agent runs (no sandbox limits).
+  if (!['read-only', 'workspace-write', 'danger-full-access'].includes(sandbox)) throw new Error(`Unsupported codex sandbox "${sandbox}"`);
   const args = ['exec', '--json', '--ephemeral', '--skip-git-repo-check'];
   if (cwd) args.push('-C', cwd);
   for (const d of addDirs) args.push('--add-dir', d);

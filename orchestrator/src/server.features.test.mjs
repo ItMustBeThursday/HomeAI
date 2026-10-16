@@ -157,7 +157,7 @@ test('streaming chat sends start, attempt, deltas and a done event with the save
   const r = await sse('/api/chat', { prompt: 'hi', stream: true }, { token: chatToken });
   assert.equal(r.status, 200);
   assert.match(r.type, /text\/event-stream/);
-  assert.deepEqual(r.events.map((e) => e.type), ['start', 'attempt', 'delta', 'delta', 'done']);
+  assert.deepEqual(r.events.map((e) => e.type), ['start', 'conversation', 'attempt', 'delta', 'delta', 'done']);
   const done = r.events.at(-1);
   assert.equal(done.reply.text, 'hello');
   assert.ok(done.conversation.id);
@@ -174,12 +174,36 @@ test('streaming errors that happen after the stream opened arrive as an error ev
   assert.equal(badImage.status, 400);
 });
 
-test('a client that disconnects mid-stream cancels the model call', async () => {
+test('a dropped connection does not cancel a chat/task run; only POST /api/runs/:id/cancel does', async () => {
   const before = runs.length;
-  await sse('/api/task', { prompt: 'hang', stream: true }, { token: chatToken, abortAfterFirstEvent: true });
-  for (let i = 0; i < 50 && !runs.at(-1)?.aborted; i++) await new Promise((r) => setTimeout(r, 20));
+  const runId = 'run-detach-0001';
+  await sse('/api/task', { prompt: 'hang', stream: true, runId }, { token: chatToken, abortAfterFirstEvent: true });
+  await new Promise((r) => setTimeout(r, 150));
   assert.equal(runs.length, before + 1);
+  assert.equal(runs.at(-1).aborted, undefined, 'the run must keep going after the client drops');
+  const cancel = await call('POST', `/api/runs/${runId}/cancel`, { token: chatToken, body: {} });
+  assert.equal(cancel.status, 200);
+  for (let i = 0; i < 50 && !runs.at(-1)?.aborted; i++) await new Promise((r) => setTimeout(r, 20));
   assert.equal(runs.at(-1).aborted, true);
+  const again = await call('POST', `/api/runs/${runId}/cancel`, { token: chatToken, body: {} });
+  assert.equal(again.status, 404, 'a finished run cannot be cancelled again');
+});
+
+test('chat streams announce the conversation id early so a client that drops can find the reply', async () => {
+  const s = await sse('/api/chat', { prompt: 'hi there', stream: true, runId: 'run-conv-0001' }, { token: chatToken });
+  const ev = s.events.find((e) => e.type === 'conversation');
+  assert.ok(ev && typeof ev.id === 'string');
+  assert.ok(s.events.findIndex((e) => e.type === 'conversation') < s.events.findIndex((e) => e.type === 'done'));
+});
+
+test('a run id that is already running is refused with 409', async () => {
+  const runId = 'run-dupe-0001';
+  const first = sse('/api/task', { prompt: 'hang', stream: true, runId }, { token: chatToken });
+  await new Promise((r) => setTimeout(r, 100));
+  const second = await call('POST', '/api/task', { token: chatToken, body: { prompt: 'x', stream: true, runId } });
+  assert.equal(second.status, 409);
+  await call('POST', `/api/runs/${runId}/cancel`, { token: chatToken, body: {} });
+  await first;
 });
 
 test('images: stored, routed to the vision route, readable back, and visible only with read scope', async () => {
@@ -369,4 +393,10 @@ test('hostAllowed and isRemote', () => {
   assert.equal(isRemote({ headers: {}, socket: { remoteAddress: '::ffff:127.0.0.1' } }), false);
   assert.equal(isRemote({ headers: {}, socket: { remoteAddress: '192.168.1.5' } }), true);
   assert.equal(isRemote({ headers: { via: '1.1 proxy' }, socket: { remoteAddress: '127.0.0.1' } }), true);
+});
+
+
+test('usage reset is restricted to admin devices', async () => {
+  assert.equal((await call('POST', '/api/usage/reset', { token: chatToken })).status, 403);
+  assert.equal((await call('POST', '/api/usage/reset', { token: readToken })).status, 403);
 });

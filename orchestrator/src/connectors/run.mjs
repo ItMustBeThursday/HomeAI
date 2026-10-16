@@ -85,6 +85,7 @@ export function createRunner({
   fetchImpl = fetch,
   baseEnv = process.env,
   readFile = readFileSync,
+  comfyRun,
 } = {}) {
   const env = { ...baseEnv };
   for (const k of STRIPPED_ENV) delete env[k];
@@ -205,7 +206,7 @@ export function createRunner({
         const input = system ? `${system}\n\n${prompt}` : prompt;
         const args = [codexScript, ...buildCodexArgs({
           model: entry.model, stdinPrompt: true, images: images.map((i) => i.path),
-          sandbox: canWrite ? 'workspace-write' : 'read-only', cwd: agent ? workDir : undefined, addDirs: agent ? addDirs : [], network: canWrite,
+          sandbox: canWrite ? 'danger-full-access' : 'read-only', cwd: agent ? workDir : undefined, addDirs: agent ? addDirs : [], network: canWrite,
         })];
         const onLine = streaming ? (line) => codexEvents(line).forEach(emit) : undefined;
         return viaCli(nodeBin, args, input, parseCodexJsonl, { signal, runCwd: agent ? workDir : undefined, limit: agent ? AGENT_TIMEOUT_MS : undefined, onLine });
@@ -213,6 +214,11 @@ export function createRunner({
       case 'ollama': {
         if (images.length && !entry.vision) throw new Error(`Connector ${entry.model} cannot read images`);
         return viaOllama(entry, prompt, system, { images: images.map((i) => readFile(i.path).toString('base64')), signal, emit });
+      }
+      case 'comfyui': {
+        if (!comfyRun) throw new Error('ComfyUI is not configured');
+        if (agent) throw new Error('Media connectors cannot run agent routes');
+        return comfyRun(entry, { prompt, signal });
       }
       default:
         throw new Error(`Unknown connector kind "${entry.kind}"`);

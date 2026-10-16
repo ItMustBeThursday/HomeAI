@@ -129,9 +129,8 @@ test('codex agent uses workspace-write in the project; images are passed as path
   assert.equal(r.text, 'done');
   assert.deepEqual(seen.map((e) => e.type), ['tool', 'delta']);
   const a = calls[0].args;
-  assert.equal(a[a.indexOf('-s') + 1], 'workspace-write');
+  assert.equal(a[a.indexOf('-s') + 1], 'danger-full-access');
   assert.equal(a[a.indexOf('-C') + 1], 'D:\\proj');
-  assert.ok(a.includes('sandbox_workspace_write.network_access=true'));
   assert.equal(a[a.indexOf('-i') + 1], 'img.png');
   assert.equal(calls[0].cwd, 'D:\\proj');
 });

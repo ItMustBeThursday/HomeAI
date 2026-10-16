@@ -1,7 +1,7 @@
 // Explicit task-type → connector chain routing. Pure; no I/O.
 import { validateAuto } from './autoroute.mjs';
 
-const KINDS = new Set(['claude-cli', 'codex-cli', 'ollama']);
+const KINDS = new Set(['claude-cli', 'codex-cli', 'ollama', 'comfyui']);
 
 const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 
@@ -41,12 +41,18 @@ export function validateRoutes(config) {
   return config;
 }
 
+// Extra fields a ComfyUI connector needs in a chain entry (other kinds need none).
+export function comfyFields(c) {
+  return c.kind === 'comfyui' ? { workflow: c.workflow, media: c.media, defaults: c.defaults ?? {} } : {};
+}
+
 export function resolveChain(config, taskType) {
   const route = Object.hasOwn(config.routes, taskType) ? config.routes[taskType] : config.routes[config.default];
   return route.chain.map((name) => {
     const c = config.connectors[name];
     return {
       connector: name, kind: c.kind, model: c.model, maxTurns: route.maxTurns ?? 1, tools: [...(route.tools ?? [])],
+      ...comfyFields(c),
       ...(c.vision ? { vision: true } : {}),
       ...(route.agent ? { agent: true } : {}),
       ...(route.readOnly ? { readOnly: true } : {}),

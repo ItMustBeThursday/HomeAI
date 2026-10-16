@@ -109,11 +109,12 @@ test('routes that opt into memory get matching notes in the system prompt; other
   const systems = [];
   const o = createOrchestrator({ config, memory, run: async (e, p) => (systems.push(p.system), ok('x')) });
   await o.task({ taskType: 'general', prompt: 'where is the wifi router', system: 'base' });
-  assert.match(systems[0], /^base\n\nThings to remember/);
+  assert.match(systems[0], /base\n\nThings to remember/);
   assert.match(systems[0], /garage/);
   assert.match(systems[0], /OneDrive/);
   await o.task({ taskType: 'plain', prompt: 'where is the wifi router', system: 'base' });
-  assert.equal(systems[1], 'base');
+  assert.match(systems[1], /base$/);
+  assert.match(systems[1], /Do the authorized work yourself/);
 });
 
 test('chat stores image references and the project, and tells later turns an image was attached', async () => {

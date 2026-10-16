@@ -155,3 +155,14 @@ test('serves static web files without traversal', async () => {
   assert.equal((await call('GET', '/%2e%2e/%2e%2e/package.json')).status, 404);
   assert.equal((await call('GET', '/missing.js')).status, 404);
 });
+
+
+test('usage reset requires authentication and preserves task history', async () => {
+  assert.equal((await call('POST', '/api/usage/reset')).status, 401);
+  const before = json(await call('GET', '/api/history', { headers: auth })).tasks;
+  const r = await call('POST', '/api/usage/reset', { headers: auth });
+  assert.equal(r.status, 200);
+  assert.equal(json(r).ok, true);
+  assert.equal(json(await call('GET', '/api/usage', { headers: auth })).total.calls, 0);
+  assert.deepEqual(json(await call('GET', '/api/history', { headers: auth })).tasks, before);
+});

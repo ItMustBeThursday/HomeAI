@@ -23,7 +23,8 @@ test('returns first successful connector and records usage', async () => {
   assert.equal(calls.length, 1);
   assert.equal(calls[0][0], 'a');
   assert.equal(calls[0][1].prompt, 'p');
-  assert.equal(calls[0][1].system, 's');
+  assert.match(calls[0][1].system, /Use the tools actually available/);
+  assert.match(calls[0][1].system, /s$/);
   assert.deepEqual(calls[0][1].images, []);
   assert.equal(o.usage(0).total.calls, 1);
 });
@@ -42,14 +43,15 @@ test('unknown task type uses default route', async () => {
   assert.equal((await o.task({ taskType: 'nope', prompt: 'p' })).taskType, 'quick');
 });
 
-test('skips connectors over budget and reports total failure', async () => {
+test('usage caps never block repeated connector calls', async () => {
   let t = 1000;
   const caps = { daily: { perConnector: { b: { calls: 1 } } } };
   const o = createOrchestrator({ config, caps, now: () => t++, run: async (e) => (e.connector === 'b' ? ok('b') : { ok: false, error: 'bad', inputTokens: 0, outputTokens: 0 }) });
   assert.equal((await o.task({ taskType: 'solo', prompt: 'p' })).ok, true);
   const r = await o.task({ taskType: 'solo', prompt: 'p' });
-  assert.equal(r.ok, false);
-  assert.match(r.attempts[0].skipped, /Connector "b" call cap for this block/);
+  assert.equal(r.ok, true);
+  assert.equal(r.connector, 'b');
+  assert.equal(o.budget('b', 'solo').allowed, true);
 });
 
 test('rejects bad input', async () => {
@@ -70,7 +72,7 @@ test('ledger persists across restarts and skips corrupt lines', async () => {
   assert.equal(readFileSync(file, 'utf8').split('\n').filter(Boolean).length, 2);
 });
 
-test('pinned connector runs only that connector', async () => {
+test('preferred connector runs first and success does not call alternatives', async () => {
   const used = [];
   const o = createOrchestrator({ config, run: async (e) => (used.push(e.connector), ok('x')) });
   const r = await o.task({ taskType: 'quick', prompt: 'p', connector: 'b' });
@@ -122,4 +124,21 @@ test('missing ledger file loads empty', () => {
   const dir = mkdtempSync(join(tmpdir(), 'orch-'));
   writeFileSync(join(dir, 'x'), '');
   assert.deepEqual(createLedgerStore(join(dir, 'none.jsonl')).load(), []);
+});
+
+
+test('clearing usage survives restart, preserves ledger, and counts calls at the same clock tick', async () => {
+  const file = join(mkdtempSync(join(tmpdir(), 'usage-reset-')), 'ledger.jsonl');
+  const make = () => createOrchestrator({ config, store: createLedgerStore(file), now: () => 1000, run: async () => ok('x') });
+  const o = make();
+  await o.task({ prompt: 'one' });
+  const original = readFileSync(file, 'utf8');
+  o.clearUsage();
+  assert.equal(o.usage(0).total.calls, 0);
+  assert.equal(readFileSync(file, 'utf8'), original);
+  const again = make();
+  assert.equal(again.usage(0).total.calls, 0);
+  await again.task({ prompt: 'two' });
+  assert.equal(again.usage(0).total.calls, 1);
+  assert.equal(createLedgerStore(file).load().length, 2);
 });

@@ -32,7 +32,8 @@ test('parseClaudeJson extracts text, usage and cost', () => {
 
 test('buildCodexArgs', () => {
   assert.deepEqual(buildCodexArgs({ prompt: 'p', model: 'gpt-5' }), ['exec', '--json', '--ephemeral', '--skip-git-repo-check', '-m', 'gpt-5', '-s', 'read-only', 'p']);
-  assert.throws(() => buildCodexArgs({ prompt: 'p', model: 'm', sandbox: 'danger-full-access' }), /sandbox/);
+  assert.deepEqual(buildCodexArgs({ prompt: 'p', model: 'm', sandbox: 'danger-full-access' }), ['exec', '--json', '--ephemeral', '--skip-git-repo-check', '-m', 'm', '-s', 'danger-full-access', 'p']);
+  assert.throws(() => buildCodexArgs({ prompt: 'p', model: 'm', sandbox: 'bogus' }), /sandbox/);
 });
 
 test('stdinPrompt keeps the prompt out of argv', () => {

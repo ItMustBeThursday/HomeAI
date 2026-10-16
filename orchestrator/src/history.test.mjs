@@ -30,6 +30,21 @@ test('buildPrompt folds recent turns within the limit', () => {
   assert.match(p, /User's new message:\nnew$/);
 });
 
+test('buildPrompt keeps failed turns as notes and says when older turns were left out', () => {
+  const msgs = [
+    { role: 'user', text: 'run the tests' },
+    { role: 'assistant', text: '', error: 'Every connector in the route failed or was over budget' },
+    { role: 'user', text: 'try again' },
+  ];
+  const p = buildPrompt(msgs, 'and now?');
+  assert.match(p, /User: run the tests\n\nAssistant: \(no answer: Every connector/);
+  assert.doesNotMatch(p, /left out/);
+  const clipped = buildPrompt([{ role: 'user', text: 'x'.repeat(500) }, { role: 'assistant', text: 'recent' }], 'next', 100);
+  assert.match(clipped, /Earlier messages were left out/);
+  assert.match(clipped, /Assistant: recent/);
+  assert.doesNotMatch(clipped, /xxxx/);
+});
+
 test('conversations: archived and trash lists, trash and restore', () => {
   const dir = tmp();
   let t = 0;

@@ -19,7 +19,7 @@ async function version(spawnImpl, cmd, args) {
   }
 }
 
-export function createStatusChecker({ ollamaBase = 'http://127.0.0.1:11435', claudeBin = 'claude', codexScript, nodeBin = process.execPath, fetchImpl = fetch, spawnImpl = spawn, exists = existsSync, ttlMs = 30_000, now = Date.now }) {
+export function createStatusChecker({ ollamaBase = 'http://127.0.0.1:11435', comfyBase = 'http://127.0.0.1:8188', claudeBin = 'claude', codexScript, nodeBin = process.execPath, fetchImpl = fetch, spawnImpl = spawn, exists = existsSync, ttlMs = 30_000, now = Date.now }) {
   let cached = null;
 
   async function check(config) {
@@ -33,6 +33,17 @@ export function createStatusChecker({ ollamaBase = 'http://127.0.0.1:11435', cla
           backends.ollama = { ok: true, detail: ollamaBase, installed: tags.models.map((m) => m.name), loaded: ps.models.map((m) => m.name) };
         } catch (err) {
           backends.ollama = { ok: false, detail: `${ollamaBase}: ${err.message}`, installed: [], loaded: [] };
+        }
+      })());
+    }
+    if (kinds.has('comfyui')) {
+      jobs.push((async () => {
+        try {
+          const stats = await getJson(fetchImpl, `${comfyBase}/system_stats`, 3000);
+          const gpu = stats.devices?.find((d) => d.type !== 'cpu');
+          backends.comfyui = { ok: true, detail: gpu ? `${comfyBase} (${gpu.name})` : comfyBase };
+        } catch (err) {
+          backends.comfyui = { ok: false, detail: `${comfyBase}: ${err.message}` };
         }
       })());
     }

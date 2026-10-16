@@ -1,14 +1,1 @@
-{
-  "window": { "hours": 5, "resetAt": "08:00" },
-  "caps": {
-    "perConnector": {
-      "claude-haiku": { "calls": 300 },
-      "claude-sonnet": { "tokens": 2000000, "calls": 150 },
-      "claude-opus": { "tokens": 1000000, "calls": 40 },
-      "codex": { "tokens": 2000000, "calls": 150 }
-    },
-    "perTaskType": {
-      "agent": { "calls": 40 }
-    }
-  }
-}
+{}
