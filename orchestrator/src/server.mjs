@@ -93,7 +93,7 @@ export function isRemote(req) {
 
 // saveConfig(kind, obj) persists an edit ('routes' | 'budgets'); status(config, opts) checks connector health.
 // auth: createAuth(...) from access.mjs (scoped tokens). token: legacy single bearer token (tests). Neither: open.
-export function createApp({ orchestrator, conversations, scheduler, jobs, saveConfig, status, auth, token, attachments, memory, shell, github, connections, network = {}, webDir, version = '0.0.0', now = Date.now, tokenFile }) {
+export function createApp({ orchestrator, conversations, scheduler, jobs, grants, saveConfig, status, auth, token, attachments, memory, shell, terminals, github, connections, network = {}, webDir, version = '0.0.0', now = Date.now, tokenFile }) {
   const identify = auth
     ? (h) => auth.identify(h)
     : token
@@ -155,12 +155,12 @@ export function createApp({ orchestrator, conversations, scheduler, jobs, saveCo
   // ---- read ----
   add('GET', '/api/config', 'read', () => {
     const { connectors, routes: r, default: def, auto } = orchestrator.config;
-    return { connectors, routes: r, default: def, auto, caps: orchestrator.caps, editable: !!saveConfig, features: { shell: !!shell, memory: !!memory, github: !!github, images: !!attachments, devices: !!auth, connections: !!connections, scheduler: !!scheduler, jobs: !!jobs } };
+    return { connectors, routes: r, default: def, auto, caps: orchestrator.caps, editable: !!saveConfig, features: { shell: !!shell, terminals: !!terminals, memory: !!memory, github: !!github, images: !!attachments, devices: !!auth, connections: !!connections, scheduler: !!scheduler, jobs: !!jobs, access: !!grants } };
   });
   add('GET', '/api/usage', 'read', (c) => {
     const hours = Number(c.url.searchParams.get('hours') ?? 24);
     if (!Number.isFinite(hours) || hours <= 0) throw new HttpError(400, 'hours must be a positive number');
-    return { hours, ...orchestrator.usage(now() - hours * 3_600_000), caps: orchestrator.capStatus() };
+    return { hours, ...orchestrator.usage(now() - hours * 3_600_000), caps: orchestrator.capStatus(), window: orchestrator.budgetWindow() };
   });
   add('GET', '/api/status', 'read', async (c) => need(status, 'Status checks')(orchestrator.config, { fresh: c.url.searchParams.get('fresh') === '1' }));
   add('GET', '/api/history', 'read', (c) => {
@@ -199,6 +199,23 @@ export function createApp({ orchestrator, conversations, scheduler, jobs, saveCo
   add('POST', '/api/jobs/pause', 'admin', () => (need(jobs, 'Jobs').pause(), jobs.stats()));
   add('POST', '/api/jobs/resume', 'admin', () => (need(jobs, 'Jobs').resume(), jobs.stats()));
   add('POST', '/api/jobs/:id/cancel', 'admin', (c) => userCall(() => need(jobs, 'Jobs').cancel(c.params.id)));
+  // Notes on a job's ongoing thought process. apply:true also cuts a running job short (or re-queues a finished one) so the note takes effect now.
+  add('POST', '/api/jobs/:id/notes', 'admin', async (c) => {
+    const body = await readJson(c.req);
+    return userCall(() => need(jobs, 'Jobs').addNote(c.params.id, body.text, { apply: !!body.apply }));
+  });
+  // The answer to a folder-access request: once | always | deny.
+  add('POST', '/api/jobs/:id/access', 'admin', async (c) => {
+    const body = await readJson(c.req);
+    return userCall(() => need(jobs, 'Jobs').resolveAccess(c.params.id, body.decision));
+  });
+  // Standing folder permissions (beyond project folders) for agent runs.
+  add('GET', '/api/access', 'admin', () => ({ folders: need(grants, 'Access grants').list() }));
+  add('POST', '/api/access', 'admin', async (c) => {
+    const body = await readJson(c.req);
+    return userCall(() => need(grants, 'Access grants').add({ path: body.path, write: body.write !== false, note: body.note }));
+  });
+  add('DELETE', '/api/access/:id', 'admin', (c) => userCall(() => (need(grants, 'Access grants').remove(c.params.id), { ok: true })));
   add('POST', '/api/jobs/:id/retry', 'admin', async (c) => {
     const body = await readJson(c.req);
     return userCall(() => need(jobs, 'Jobs').retry(c.params.id, body.guidance));
@@ -252,6 +269,11 @@ export function createApp({ orchestrator, conversations, scheduler, jobs, saveCo
     if (typeof body.title !== 'string' || !body.title.trim()) throw new HttpError(400, 'title must be a non-empty string');
     return userCall(() => need(conversations, 'Chat').rename(c.params.id, body.title.trim()));
   });
+  add('POST', '/api/conversations/:id/notes', 'chat', async (c) => {
+    const body = await readJson(c.req);
+    return userCall(() => ({ notes: need(conversations, 'Chat').addNote(c.params.id, body.text) }));
+  });
+  add('DELETE', '/api/conversations/:id/notes/:noteId', 'chat', (c) => userCall(() => ({ notes: need(conversations, 'Chat').removeNote(c.params.id, c.params.noteId) })));
   add('DELETE', '/api/conversations/:id', 'chat', (c) => userCall(() => (need(conversations, 'Chat').archive(c.params.id), { ok: true, archived: c.params.id })));
   add('GET', '/api/attachments/:id', 'read', async (c) => {
     const f = await userCall(() => need(attachments, 'Image attachments').file(c.params.id));
@@ -290,6 +312,37 @@ export function createApp({ orchestrator, conversations, scheduler, jobs, saveCo
     const sh = need(shell, 'Shell access');
     return maybeStream(c, body, (extra) => userCall(() => sh.exec({ command: body.command, project: body.project, cwd: body.cwd, timeoutMs: body.timeoutMs, who: c.identity.id, signal: extra.signal, onData: extra.onEvent && ((d) => extra.onEvent({ type: d.stream, text: d.text })) })));
   });
+  // ---- interactive terminals: long-lived shells; output streams over SSE and can be re-attached with ?since=<seq> ----
+  add('GET', '/api/terminal', 'admin', () => ({ sessions: need(terminals, 'Terminals').list(), default: shell?.projects().find((p) => p.name === shell.default)?.path }));
+  add('POST', '/api/terminal', 'admin', async (c) => {
+    const body = await readJson(c.req);
+    return userCall(() => need(terminals, 'Terminals').create({ cwd: body.cwd, shell: body.shell, who: c.identity.id }));
+  });
+  add('GET', '/api/terminal/:id/stream', 'admin', async (c) => {
+    const t = need(terminals, 'Terminals');
+    const since = Number(c.url.searchParams.get('since') ?? 0);
+    const s = openStream(c.res);
+    c.streamed = true;
+    let off = () => {};
+    try {
+      off = await userCall(() => t.subscribe(c.params.id, Number.isFinite(since) ? since : 0, (ev) => {
+        s.send(ev);
+        if (ev.type === 'exit' && ev.closed) s.end();
+      }));
+    } catch (err) {
+      s.send({ type: 'error', error: err.message });
+      return s.end();
+    }
+    c.res.on('close', off);
+    return undefined;
+  });
+  add('POST', '/api/terminal/:id/input', 'admin', async (c) => {
+    const body = await readJson(c.req);
+    return userCall(() => need(terminals, 'Terminals').input(c.params.id, body.data, { run: !!body.run, who: c.identity.id }));
+  });
+  add('POST', '/api/terminal/:id/interrupt', 'admin', (c) => userCall(() => need(terminals, 'Terminals').interrupt(c.params.id, { who: c.identity.id })));
+  add('DELETE', '/api/terminal/:id', 'admin', (c) => userCall(() => need(terminals, 'Terminals').close(c.params.id, { who: c.identity.id })));
+
   add('POST', '/api/projects/:name/test', 'admin', async (c) => {
     const body = await readJson(c.req);
     const sh = need(shell, 'Shell access');

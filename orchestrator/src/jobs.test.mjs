@@ -179,3 +179,116 @@ test('continuePrompt includes the task, recent actions and last output', () => {
   assert.match(t, /last words/);
   assert.match(t, /Approved plan:\nP/);
 });
+
+test('NEEDS_ACCESS parks the job; "once" resumes with the folder for this job only', async () => {
+  const seen = [];
+  const jobs = make(async ({ job, prompt }) => {
+    seen.push({ prompt, grants: [...job.grants] });
+    return job.grants.length ? ok('finished with D:\\Games') : ok('Cannot continue.\nNEEDS_ACCESS: D:\\Games | need the save files');
+  });
+  const j = jobs.add({ prompt: 'back up saves', project: 'p' });
+  await jobs.idle();
+  let d = jobs.get(j.id);
+  assert.equal(d.status, 'needs-access');
+  assert.deepEqual({ path: d.access.path, reason: d.access.reason }, { path: 'D:\\Games', reason: 'need the save files' });
+  jobs.resolveAccess(j.id, 'once');
+  await jobs.idle();
+  d = jobs.get(j.id);
+  assert.equal(d.status, 'done');
+  assert.deepEqual(d.grants, ['D:\\Games']);
+  assert.match(seen[1].prompt, /Folder access now granted.*D:\\Games/);
+  assert.throws(() => jobs.resolveAccess(j.id, 'once'), /not waiting/);
+});
+
+test('"always" saves the folder through grantAlways; "deny" tells the agent and never asks again', async () => {
+  const saved = [];
+  const prompts = [];
+  const jobs = make(async ({ prompt }) => (prompts.push(prompt), ok('x\nNEEDS_ACCESS: D:\\Music')), { grantAlways: (p) => saved.push(p) });
+  const a = jobs.add({ prompt: 'one', project: 'a' });
+  await jobs.idle();
+  jobs.resolveAccess(a.id, 'always');
+  await jobs.idle();
+  assert.deepEqual(saved, ['D:\\Music']);
+  // already granted to this job, so the repeat request is not raised again
+  assert.equal(jobs.get(a.id).status, 'done');
+
+  const b = jobs.add({ prompt: 'two', project: 'b' });
+  await jobs.idle();
+  assert.equal(jobs.get(b.id).status, 'needs-access');
+  jobs.resolveAccess(b.id, 'deny');
+  await jobs.idle();
+  assert.equal(jobs.get(b.id).status, 'done');
+  assert.match(prompts.at(-1), /was denied/);
+});
+
+test('tool denials raise an access request for the refused file\'s folder; off-limits folders are not offered', async () => {
+  const vet = (p) => { if (/one.?drive/i.test(p)) throw new Error('that cloud folder is off limits'); return p; };
+  const odPath = ['C:', 'Users', 'x', 'One' + 'Drive', 'b.txt'].join('\\');
+  const jobs = make(async ({ job }) => ok('could not read it', { denials: job.grants.length ? [] : [{ tool: 'Read', path: odPath }, { tool: 'Read', path: 'E:\\Data\\notes\\a.txt' }] }), { vetFolder: vet });
+  const j = jobs.add({ prompt: 'read it', project: 'p' });
+  await jobs.idle();
+  const d = jobs.get(j.id);
+  assert.equal(d.status, 'needs-access');
+  assert.equal(d.access.path, 'E:\\Data\\notes');
+  assert.ok(d.log.some((l) => /Not asking for.*off limits/.test(l.msg)));
+});
+
+test('a note added while running is applied before the job counts as done', async () => {
+  const prompts = [];
+  let jobs;
+  jobs = make(async ({ job, prompt }) => {
+    prompts.push(prompt);
+    if (prompts.length === 1) jobs.addNote(job.id, 'also update the README');
+    return ok(`round ${prompts.length}`);
+  });
+  const j = jobs.add({ prompt: 'build it', project: 'p' });
+  await jobs.idle();
+  assert.equal(prompts.length, 2);
+  assert.match(prompts[1], /also update the README/);
+  assert.equal(jobs.get(j.id).status, 'done');
+  assert.equal(jobs.get(j.id).result.text, 'round 2');
+});
+
+test('apply-now interrupts the running job and resumes it with the note', async () => {
+  const prompts = [];
+  let jobs;
+  jobs = make(({ job, prompt, signal }) => {
+    prompts.push(prompt);
+    if (prompts.length > 1) return Promise.resolve(ok('done with note'));
+    return new Promise((resolve) => {
+      signal.addEventListener('abort', () => resolve({ ok: false, error: 'Cancelled', text: 'half way' }));
+      setTimeout(() => jobs.addNote(job.id, 'use tabs', { apply: 'now' }), 5);
+    });
+  });
+  const j = jobs.add({ prompt: 'format code', project: 'p' });
+  await jobs.idle();
+  const d = jobs.get(j.id);
+  assert.equal(d.status, 'done');
+  assert.equal(d.attempts, 1);
+  assert.match(prompts[1], /use tabs/);
+  assert.match(prompts[1], /half way/);
+});
+
+test('a note on a finished job can re-queue it to continue; without apply it is just recorded', async () => {
+  const prompts = [];
+  const jobs = make(async ({ prompt }) => (prompts.push(prompt), ok(`result ${prompts.length}`)));
+  const j = jobs.add({ prompt: 'write docs', project: 'p' });
+  await jobs.idle();
+  jobs.addNote(j.id, 'remember to mention setup');
+  assert.equal(jobs.get(j.id).status, 'done');
+  jobs.addNote(j.id, 'and troubleshooting', { apply: 'now' });
+  await jobs.idle();
+  assert.equal(prompts.length, 2);
+  assert.match(prompts[1], /mention setup/);
+  assert.match(prompts[1], /troubleshooting/);
+  assert.match(prompts[1], /result 1/);
+  assert.throws(() => jobs.addNote(j.id, '  '), /non-empty/);
+});
+
+test('needs-access jobs survive clearFinished', async () => {
+  const jobs = make(async () => ok('NEEDS_ACCESS: D:\\Games'));
+  const j = jobs.add({ prompt: 'x', project: 'p' });
+  await jobs.idle();
+  assert.equal(jobs.clearFinished().cleared, 0);
+  assert.equal(jobs.get(j.id).status, 'needs-access');
+});

@@ -161,7 +161,7 @@ export function createRunner({
 
   // images: [{path, mediaType}] already stored on disk by the caller.
   // entry.agent: let the model use tools (shell, files) inside opts.cwd; otherwise it is a plain text call.
-  return async function run(entry, { prompt, system, images = [], cwd: workDir, signal, onDelta, onEvent } = {}) {
+  return async function run(entry, { prompt, system, images = [], cwd: workDir, addDirs = [], signal, onDelta, onEvent } = {}) {
     if (typeof prompt !== 'string' || !prompt) throw new Error('prompt must be a non-empty string');
     const emit = (ev) => {
       onEvent?.(ev);
@@ -178,7 +178,7 @@ export function createRunner({
         const args = buildClaudeArgs({
           model: entry.model, systemPrompt: system, tools: entry.tools, maxTurns: entry.maxTurns, stdinPrompt: true,
           stream: streaming, streamInput: withImages,
-          allowedTools: agent ? entry.tools : undefined, permissionMode: canWrite ? 'acceptEdits' : undefined,
+          allowedTools: agent ? entry.tools : undefined, permissionMode: canWrite ? 'acceptEdits' : undefined, addDirs: agent ? addDirs : [],
         });
         const input = withImages
           ? buildClaudeStreamInput({ prompt, images: images.map((i) => ({ mediaType: i.mediaType, data: readFile(i.path).toString('base64') })) })
@@ -205,7 +205,7 @@ export function createRunner({
         const input = system ? `${system}\n\n${prompt}` : prompt;
         const args = [codexScript, ...buildCodexArgs({
           model: entry.model, stdinPrompt: true, images: images.map((i) => i.path),
-          sandbox: canWrite ? 'workspace-write' : 'read-only', cwd: agent ? workDir : undefined, network: canWrite,
+          sandbox: canWrite ? 'workspace-write' : 'read-only', cwd: agent ? workDir : undefined, addDirs: agent ? addDirs : [], network: canWrite,
         })];
         const onLine = streaming ? (line) => codexEvents(line).forEach(emit) : undefined;
         return viaCli(nodeBin, args, input, parseCodexJsonl, { signal, runCwd: agent ? workDir : undefined, limit: agent ? AGENT_TIMEOUT_MS : undefined, onLine });

@@ -49,7 +49,7 @@ test('skips connectors over budget and reports total failure', async () => {
   assert.equal((await o.task({ taskType: 'solo', prompt: 'p' })).ok, true);
   const r = await o.task({ taskType: 'solo', prompt: 'p' });
   assert.equal(r.ok, false);
-  assert.match(r.attempts[0].skipped, /Connector "b" daily call cap/);
+  assert.match(r.attempts[0].skipped, /Connector "b" call cap for this block/);
 });
 
 test('rejects bad input', async () => {

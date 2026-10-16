@@ -1,7 +1,7 @@
 // Ties routing, budgets, execution and the ledger together.
 import { randomUUID } from 'node:crypto';
 import { validateRoutes, resolveChain } from './router.mjs';
-import { makeEntry, summarize, checkBudget, capStatus, validateCaps } from './ledger.mjs';
+import { makeEntry, summarize, checkBudget, capStatus, budgetWindow, validateCaps } from './ledger.mjs';
 import { buildPrompt } from './history.mjs';
 import { createAutoRouter } from './autoroute.mjs';
 
@@ -21,7 +21,7 @@ const PLAN_SYSTEM = [
 const APPROVED = 'The user approved the plan below. Carry it out step by step. If what you find differs from what the plan expected, stop and report instead of improvising. Finish with what you did, what you verified, and anything left undone.';
 
 // loadedModels(): Set of model names Ollama has in memory (lets the auto-route check avoid swapping models).
-export function createOrchestrator({ config, caps = {}, store, history, conversations, memory, run, limiter, loadedModels, now = Date.now, newId = randomUUID }) {
+export function createOrchestrator({ config, caps = {}, store, history, conversations, memory, run, limiter, dirsFor, loadedModels, now = Date.now, newId = randomUUID }) {
   validateRoutes(config);
   validateCaps(caps, { connectors: Object.keys(config.connectors), taskTypes: Object.keys(config.routes) });
   if (typeof run !== 'function') throw new Error('run must be a function');
@@ -70,7 +70,7 @@ export function createOrchestrator({ config, caps = {}, store, history, conversa
   // connector pins the request to one connector (still budget-checked); otherwise the route chain runs.
   // images: attachments already stored on disk. cwd: project directory (agent routes only).
   // onEvent receives {type:'attempt'|'delta'|'tool'|'attempt-failed', ...} while the model works; signal cancels.
-  async function task({ taskType, prompt, system, connector, source = 'api', conversationId, images = [], cwd, signal, onEvent } = {}) {
+  async function task({ taskType, prompt, system, connector, source = 'api', conversationId, images = [], cwd, addDirs = [], signal, onEvent } = {}) {
     if (typeof prompt !== 'string' || !prompt.trim()) throw new Error('prompt must be a non-empty string');
     if (system !== undefined && typeof system !== 'string') throw new Error('system must be a string');
     if (connector !== undefined && !Object.hasOwn(config.connectors, connector)) throw new Error(`Unknown connector "${connector}"`);
@@ -112,7 +112,7 @@ export function createOrchestrator({ config, caps = {}, store, history, conversa
       const emit = (ev) => onEvent?.({ ...ev, connector: entry.connector });
       const call = () => {
         if (signal?.aborted) throw Object.assign(new Error('Cancelled'), { cancelled: true });
-        return run(entry, { prompt, system: sys, images, cwd, signal, onEvent: onEvent ? emit : undefined });
+        return run(entry, { prompt, system: sys, images, cwd, addDirs: [...addDirs, ...(dirsFor?.({ readOnly: !!entry.readOnly }) ?? [])], signal, onEvent: onEvent ? emit : undefined });
       };
       let out;
       try {
@@ -125,7 +125,7 @@ export function createOrchestrator({ config, caps = {}, store, history, conversa
       const attempt = { connector: entry.connector, model: entry.model, ok: !!out.ok, ms, inputTokens: out.inputTokens ?? 0, outputTokens: out.outputTokens ?? 0, costUsd: out.costUsd ?? null };
       if (out.ok) {
         attempts.push(attempt);
-        result = { ok: true, text: out.text, connector: entry.connector, model: entry.model, taskType: route };
+        result = { ok: true, text: out.text, connector: entry.connector, model: entry.model, taskType: route, ...(out.denials ? { denials: out.denials } : {}) };
         break;
       }
       attempts.push({ ...attempt, error: out.error ?? 'connector reported failure' });
@@ -166,7 +166,8 @@ export function createOrchestrator({ config, caps = {}, store, history, conversa
       type = auto ? auto.route : taskType || conv.taskType;
       modelPrompt = buildPrompt(conv.messages, prompt);
     }
-    const reply = await task({ taskType: type, prompt: modelPrompt, system: CHAT_SYSTEM, connector, source: 'chat', conversationId: conv.id, images, cwd, signal, onEvent });
+    const notes = conv.notes?.length ? `Notes the user pinned to this conversation (follow them):\n${conv.notes.map((n) => `- ${n.text}`).join('\n')}` : '';
+    const reply = await task({ taskType: type, prompt: modelPrompt, system: [CHAT_SYSTEM, notes].filter(Boolean).join('\n\n'), connector, source: 'chat', conversationId: conv.id, images, cwd, signal, onEvent });
     const refs = images.map(({ id, name, mediaType }) => ({ id, name, mediaType }));
     const userMsg = { role: 'user', text: prompt, ts: now(), ...(refs.length ? { images: refs } : {}), ...(approve ? { approved: true } : {}) };
     const where = cwd && project ? { project } : {};
@@ -193,6 +194,7 @@ export function createOrchestrator({ config, caps = {}, store, history, conversa
     usage: (sinceMs) => summarize(entries, sinceMs),
     budget: (connector, taskType) => checkBudget(entries, caps, connector, taskType, now()),
     capStatus: () => capStatus(entries, caps, now()),
+    budgetWindow: () => budgetWindow(caps, now()),
     queue: () => limiter?.stats() ?? {},
     // Validated before swapping, so a bad edit can't break a running service.
     setConfig(next) {

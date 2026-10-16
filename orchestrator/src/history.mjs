@@ -88,6 +88,25 @@ export function createConversationStore(dir, { now = Date.now, newId = randomUUI
       conv.updated = now();
       return write(conv);
     },
+    // Standing notes on a conversation: guidance the model sees on every later turn (and on plan approval).
+    addNote(id, text) {
+      const conv = read(id);
+      if (!conv) throw new Error('Conversation not found');
+      if (typeof text !== 'string' || !text.trim()) throw new Error('note must be a non-empty string');
+      (conv.notes ??= []).push({ id: newId(), ts: now(), text: clip(text.trim(), 4000) });
+      conv.updated = now();
+      write(conv);
+      return conv.notes;
+    },
+    removeNote(id, noteId) {
+      const conv = read(id);
+      if (!conv) throw new Error('Conversation not found');
+      const before = (conv.notes ?? []).length;
+      conv.notes = (conv.notes ?? []).filter((n) => n.id !== noteId);
+      if (conv.notes.length === before) throw new Error('Note not found');
+      write(conv);
+      return conv.notes;
+    },
     rename(id, title) {
       const conv = read(id);
       if (!conv) throw new Error('Conversation not found');

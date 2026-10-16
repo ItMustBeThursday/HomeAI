@@ -95,13 +95,14 @@ export const TOOLS = {
     },
   },
   usage: {
-    description: 'Token and call usage by model and route over a window, with daily budget status.',
+    description: 'Token and call usage by model and route over a window, with budget status for the current 5-hour block.',
     schema: obj({ hours: { type: 'number', description: 'Window in hours (default 24)' } }),
     async run(a, api) {
       const r = await api('GET', `/api/usage?hours=${a.hours ?? 24}`);
       const rows = Object.entries(r.byConnector).map(([k, t]) => `${k}: ${t.calls} calls, ${t.inputTokens} in / ${t.outputTokens} out`);
+      const span = r.window ? ` (block ${new Date(r.window.start).toLocaleTimeString()}-${new Date(r.window.end).toLocaleTimeString()})` : '';
       const caps = r.caps.map((c) => `${c.scope} ${c.name} ${c.metric}: ${c.used}/${c.limit}`);
-      return [`Last ${r.hours}h: ${r.total.calls} calls, ${r.total.inputTokens} in / ${r.total.outputTokens} out`, ...rows, caps.length ? 'Budgets:' : '', ...caps].filter(Boolean).join('\n');
+      return [`Last ${r.hours}h: ${r.total.calls} calls, ${r.total.inputTokens} in / ${r.total.outputTokens} out`, ...rows, caps.length ? `Budgets${span}:` : '', ...caps].filter(Boolean).join('\n');
     },
   },
   status: {

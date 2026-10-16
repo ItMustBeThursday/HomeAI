@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { makeEntry, summarize, checkBudget, validateCaps, capStatus } from './ledger.mjs';
+import { makeEntry, summarize, checkBudget, validateCaps, capStatus, budgetWindow } from './ledger.mjs';
 
 const T0 = 1_800_000_000_000;
 
@@ -26,7 +26,7 @@ test('capStatus lists every cap with 24h usage', () => {
   assert.deepEqual(capStatus(entries, {}, T0), []);
 });
 
-const NOW = 1_800_000_000_000;
+const NOW = new Date(2027, 0, 15, 12, 0).getTime(); // local noon: inside the 08:00-13:00 block whatever the time zone
 const HOUR = 3_600_000;
 const e = (o) => makeEntry({ ts: NOW - HOUR, connector: 'claude', taskType: 'coding', inputTokens: 100, outputTokens: 50, ...o });
 
@@ -72,14 +72,46 @@ test('checkBudget names the cap reached', () => {
   const entries = [e({}), e({})]; // 300 tokens, 2 calls
   const g = checkBudget(entries, { daily: { globalTokens: 300 } }, 'claude', 'coding', NOW);
   assert.equal(g.allowed, false);
-  assert.match(g.reason, /Global daily token cap/);
-  assert.match(checkBudget(entries, { daily: { perConnector: { claude: { calls: 2 } } } }, 'claude', 'coding', NOW).reason, /Connector "claude" daily call cap/);
-  assert.match(checkBudget(entries, { daily: { perTaskType: { coding: { tokens: 200 } } } }, 'claude', 'coding', NOW).reason, /Task type "coding" daily token cap/);
+  assert.match(g.reason, /Global token cap for this block/);
+  assert.match(checkBudget(entries, { daily: { perConnector: { claude: { calls: 2 } } } }, 'claude', 'coding', NOW).reason, /Connector "claude" call cap for this block/);
+  assert.match(checkBudget(entries, { daily: { perTaskType: { coding: { tokens: 200 } } } }, 'claude', 'coding', NOW).reason, /Task type "coding" token cap for this block/);
   // Caps on other connectors don't block this one.
   assert.equal(checkBudget(entries, { daily: { perConnector: { codex: { calls: 1 } } } }, 'claude', 'coding', NOW).allowed, true);
 });
 
-test('checkBudget ignores usage older than 24h', () => {
-  const entries = [e({ ts: NOW - 25 * HOUR, inputTokens: 10_000 })];
-  assert.equal(checkBudget(entries, { daily: { globalTokens: 100 } }, 'claude', 'coding', NOW).allowed, true);
+const at = (day, h, m = 0) => new Date(2026, 9, day, h, m).getTime(); // local time, Oct 2026
+
+test('budgetWindow: 5h blocks counted from 08:00, last block cut at the next reset', () => {
+  const w = (ts, caps = {}) => { const r = budgetWindow(caps, ts); return [r.start, r.end]; };
+  assert.deepEqual(w(at(16, 8, 0)), [at(16, 8), at(16, 13)]);
+  assert.deepEqual(w(at(16, 12, 59)), [at(16, 8), at(16, 13)]);
+  assert.deepEqual(w(at(16, 13, 0)), [at(16, 13), at(16, 18)]);
+  assert.deepEqual(w(at(16, 23, 30)), [at(16, 23), at(17, 4)]);
+  assert.deepEqual(w(at(17, 2, 0)), [at(16, 23), at(17, 4)]);
+  assert.deepEqual(w(at(17, 5, 0)), [at(17, 4), at(17, 8)]); // short block ends at the 08:00 reset
+  assert.deepEqual(w(at(17, 8, 0)), [at(17, 8), at(17, 13)]);
+  assert.deepEqual(w(at(16, 10), { window: { hours: 4, resetAt: '06:30' } }), [at(16, 6, 30), at(16, 10, 30)]);
+});
+
+test('checkBudget only counts usage in the current block, and resets at the boundary', () => {
+  const caps = { window: { hours: 5, resetAt: '08:00' }, caps: { globalTokens: 100 } };
+  const entries = [e({ ts: at(16, 12, 30), inputTokens: 10_000 })]; // 08:00-13:00 block
+  assert.equal(checkBudget(entries, caps, 'claude', 'coding', at(16, 12, 59)).allowed, false);
+  assert.equal(checkBudget(entries, caps, 'claude', 'coding', at(16, 13, 0)).allowed, true); // new block
+  // Usage from before the previous reset or earlier in the day does not count either.
+  assert.equal(checkBudget([e({ ts: at(16, 9), inputTokens: 10_000 })], caps, 'claude', 'coding', at(16, 14)).allowed, true);
+  assert.match(checkBudget(entries, caps, 'claude', 'coding', at(16, 12, 59)).reason, /Global token cap for this block/);
+});
+
+test('the old "daily" key is still read as caps', () => {
+  const entries = [e({ ts: at(16, 9), inputTokens: 10_000 })];
+  assert.equal(checkBudget(entries, { daily: { globalTokens: 100 } }, 'claude', 'coding', at(16, 10)).allowed, false);
+  assert.throws(() => validateCaps({ daily: {}, caps: {} }), /not both/);
+});
+
+test('validateCaps checks the window', () => {
+  assert.ok(validateCaps({ window: { hours: 5, resetAt: '08:00' } }));
+  assert.throws(() => validateCaps({ window: { hours: 0 } }), /hours/);
+  assert.throws(() => validateCaps({ window: { hours: 5, resetAt: '8am' } }), /HH:MM/);
+  assert.throws(() => validateCaps({ window: { span: 5 } }), /Unknown window key/);
 });

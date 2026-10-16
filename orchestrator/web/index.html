@@ -44,8 +44,10 @@
           </div>
           <div id="conv-list" class="conv-list" role="list"></div>
         </aside>
+        <div id="rail-split" class="rail-split" role="separator" aria-orientation="vertical" aria-label="Resize conversation list (double-click to reset)" tabindex="0" title="Drag to resize, double-click to reset"></div>
         <div class="thread-wrap">
           <div class="thread-head">
+            <button id="rail-toggle" class="ghost sm" title="Show or hide conversations" aria-label="Toggle conversation list">Chats</button>
             <h2 id="conv-title">New chat</h2>
             <span id="conv-meta" class="muted"></span>
             <span class="spacer"></span>
@@ -83,7 +85,7 @@
         <div id="ov-cards" class="cards"></div>
         <div class="grid-2">
           <div class="panel"><div class="panel-head"><h3>Backends</h3><button id="ov-refresh" class="ghost sm">Refresh</button></div><div id="ov-backends"></div></div>
-          <div class="panel"><div class="panel-head"><h3>Budgets, rolling 24h</h3></div><div id="ov-caps"></div></div>
+          <div class="panel"><div class="panel-head"><h3>Budgets, this 5-hour block</h3></div><div id="ov-caps"></div></div>
         </div>
         <div class="grid-2">
           <div class="panel"><div class="panel-head"><h3>Recent activity</h3><button class="ghost sm" data-go="history">All history</button></div><div id="ov-recent"></div></div>
@@ -93,19 +95,24 @@
 
       <!-- TERMINAL -->
       <section id="tab-terminal" class="tab page">
-        <p class="muted">Runs PowerShell on this PC inside a registered project folder. Every command is logged to <code>data/exec.jsonl</code>. Anything mentioning OneDrive is refused.</p>
+        <p class="muted">Real shells on this PC, in any folder, as your Windows user. State (<code>cd</code>, variables) persists, and what you type while something is running goes to it (prompts, REPLs). Commands are logged to <code>data/exec.jsonl</code>. Not a full-screen terminal (no vim/htop). Anything mentioning OneDrive is refused.</p>
         <div class="toolbar">
-          <label class="sel">Project <select id="term-project"></select></label>
-          <label class="sel">Folder <input id="term-cwd" placeholder="(project root)" size="18"></label>
-          <button id="term-clear" class="ghost sm">Clear</button>
+          <div id="term-tabs" class="term-tabs"></div>
+          <button id="term-new" class="primary sm">+ New terminal</button>
+          <label class="sel">Shell <select id="term-shell"><option value="powershell">Windows PowerShell</option><option value="pwsh">PowerShell 7</option><option value="cmd">cmd</option></select></label>
+          <label class="sel">Start in <input id="term-cwd" class="code" size="30" placeholder="folder path" spellcheck="false" list="term-paths"><datalist id="term-paths"></datalist></label>
+          <span class="spacer"></span>
+          <button id="term-interrupt" class="ghost sm" title="Ctrl+C: restart the shell in the same folder">Interrupt</button>
+          <button id="term-clear" class="ghost sm" title="Ctrl+L">Clear</button>
+          <button id="term-close" class="ghost sm danger">Close</button>
         </div>
-        <form id="term-form" class="row">
-          <input id="term-cmd" class="code grow" placeholder="Command, e.g. node --test" autocomplete="off" spellcheck="false" required>
-          <button class="primary" id="term-run">Run</button>
-          <button type="button" id="term-stop" class="danger" hidden>Stop</button>
-        </form>
-        <div id="term-hist" class="chips"></div>
-        <pre id="term-out" class="term">Output appears here.</pre>
+        <div id="term-screen" class="term-screen">
+          <pre id="term-out" class="term" tabindex="0">Open a terminal to start.</pre>
+          <form id="term-form" class="term-line">
+            <span id="term-prompt" class="term-prompt">PS&gt;</span>
+            <input id="term-cmd" class="code grow" autocomplete="off" spellcheck="false" placeholder="Type a command. Up/Down = history, Ctrl+C = interrupt, Ctrl+L = clear" disabled>
+          </form>
+        </div>
       </section>
 
       <!-- PROJECTS -->
@@ -152,7 +159,7 @@
           <button id="usage-refresh" class="ghost sm">Refresh</button>
         </div>
         <div id="usage-totals" class="cards"></div>
-        <div class="panel"><div class="panel-head"><h3>Daily budgets (rolling 24h)</h3></div><div id="usage-caps"></div></div>
+        <div class="panel"><div class="panel-head"><h3>Budgets, this 5-hour block</h3></div><div id="usage-caps"></div></div>
         <div class="grid-2 mt">
           <div class="panel"><div class="panel-head"><h3>By model</h3></div><div id="usage-conn"></div></div>
           <div class="panel"><div class="panel-head"><h3>By route</h3></div><div id="usage-route"></div></div>
@@ -218,7 +225,7 @@
             <div class="panel-head"><h3>Budgets <small>config/budgets.json</small></h3><span id="dirty-budgets" class="pill warn" hidden>unsaved</span></div>
             <textarea id="cfg-budgets" class="code editor" spellcheck="false"></textarea>
             <div class="row mt"><button id="save-budgets" class="primary">Save budgets</button><button id="fmt-budgets" class="ghost sm">Format</button><button id="reset-budgets" class="ghost sm">Revert</button><span id="msg-budgets" class="msg"></span></div>
-            <p class="muted">Shape: <code>{"daily": {"globalTokens": n, "perConnector": {"name": {"tokens": n, "calls": n}}, "perTaskType": {"route": {…}}}}</code></p>
+            <p class="muted">Shape: <code>{"window": {"hours": 5, "resetAt": "08:00"}, "caps": {"globalTokens": n, "perConnector": {"name": {"tokens": n, "calls": n}}, "perTaskType": {"route": {…}}}}</code>. Caps apply per block: blocks of <code>hours</code> start at <code>resetAt</code> (local time) each day, and the last one is cut at the next reset.</p>
           </div>
         </div>
       </section>

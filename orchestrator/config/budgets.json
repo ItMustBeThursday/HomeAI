@@ -1,5 +1,6 @@
 {
-  "daily": {
+  "window": { "hours": 5, "resetAt": "08:00" },
+  "caps": {
     "perConnector": {
       "claude-haiku": { "calls": 300 },
       "claude-sonnet": { "tokens": 2000000, "calls": 150 },

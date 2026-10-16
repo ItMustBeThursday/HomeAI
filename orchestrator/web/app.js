@@ -276,7 +276,7 @@ const TABS = [
 ];
 const TITLES = { ...Object.fromEntries(TABS.map((t) => [t.id, t.label])), settings: 'Settings' };
 const SUBS = {
-  chat: 'Route-aware conversations', jobs: 'Queue work and walk away', overview: 'Everything at a glance', terminal: 'PowerShell in a project folder', projects: 'Tests, git and GitHub',
+  chat: 'Route-aware conversations', jobs: 'Queue work and walk away', overview: 'Everything at a glance', terminal: 'Interactive shells, any folder', projects: 'Tests, git and GitHub',
   memory: 'Durable facts the models can see', usage: 'Tokens, calls and budgets', history: 'Every task and its fallbacks', status: 'Backend and model health',
   schedule: 'Timed jobs and the request queue', config: 'Routes, connectors and budgets', connections: 'Logins for GitHub and other services', devices: 'Tokens for phones and displays', logan: 'Menu catalog (coming)', settings: 'Appearance and shortcuts',
 };
@@ -784,12 +784,11 @@ async function loadProjects() {
   if (!r) return;
   projects = r.projects;
   const opts = () => projects.map((p) => h('option', { value: p.name }, p.name === r.default ? `${p.name} (default)` : p.name));
-  for (const id of ['#project', '#term-project']) {
-    const el = $(id);
-    const prev = el.value;
-    el.replaceChildren(...opts());
-    el.value = prev && projects.some((p) => p.name === prev) ? prev : r.default;
-  }
+  const el = $('#project');
+  const prev = el.value;
+  el.replaceChildren(...opts());
+  el.value = prev && projects.some((p) => p.name === prev) ? prev : r.default;
+  $('#term-paths').replaceChildren(...projects.map((p) => h('option', { value: p.path }, p.name)));
 }
 
 loaders.chat = async () => {
@@ -810,6 +809,17 @@ function capBar(c) {
   const pct = c.limit ? Math.min(100, (100 * c.used) / c.limit) : 100;
   return h('div', { class: `bar ${pct >= 100 ? 'bad' : pct >= 80 ? 'warn' : ''}` }, h('span', { style: `width:${pct}%` }));
 }
+// Budgets reset in fixed blocks (see config/budgets.json "window"); show which block we are in and when it resets.
+const clock = (ms) => new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+function blockNote(w) {
+  if (!w) return null;
+  const mins = Math.max(0, Math.round((w.end - Date.now()) / 60000));
+  return h('p', { class: 'muted' }, `Current block ${clock(w.start)}–${clock(w.end)} · resets in ${Math.floor(mins / 60)}h ${mins % 60}m`);
+}
+function capList(u) {
+  if (!u.caps.length) return h('p', { class: 'muted' }, 'No budgets configured.');
+  return h('div', {}, blockNote(u.window), h('div', { class: 'share' }, u.caps.map((c) => h('div', { class: 'share-row' }, h('span', { class: 'nm', title: `${c.scope} ${c.name} · ${c.metric}` }, `${c.name} · ${c.metric}`), capBar(c), h('span', { class: 'val' }, `${n(c.used)} / ${n(c.limit)}`)))));
+}
 loaders.overview = async () => {
   const [u, s, hist] = await Promise.all([api('/api/usage?hours=24'), api('/api/status').catch(() => null), api('/api/history?limit=8').catch(() => ({ tasks: [] }))]);
   const t = u.total;
@@ -824,9 +834,7 @@ loaders.overview = async () => {
   $('#ov-backends').replaceChildren(s
     ? h('div', { class: 'share' }, Object.entries(s.backends).map(([k, b]) => h('div', { class: 'row' }, h('span', { class: `pill ${b.ok ? 'ok' : 'bad'}` }, b.ok ? 'up' : 'down'), h('strong', {}, k), h('span', { class: 'muted' }, b.detail ?? ''))))
     : h('p', { class: 'muted' }, 'Status checks are not enabled.'));
-  $('#ov-caps').replaceChildren(u.caps.length
-    ? h('div', { class: 'share' }, u.caps.map((c) => h('div', { class: 'share-row' }, h('span', { class: 'nm', title: `${c.scope} ${c.name} · ${c.metric}` }, `${c.name} · ${c.metric}`), capBar(c), h('span', { class: 'val' }, `${n(c.used)} / ${n(c.limit)}`))))
-    : h('p', { class: 'muted' }, 'No budgets configured.'));
+  $('#ov-caps').replaceChildren(capList(u));
   $('#ov-recent').replaceChildren(hist.tasks.length
     ? h('table', {}, hist.tasks.map((x) => h('tr', { class: 'click', onclick: () => show('history') },
       h('td', { class: 'muted' }, when(x.ts)), h('td', {}, x.taskType), h('td', {}, x.connector ?? '—'),
@@ -860,9 +868,7 @@ loaders.usage = async () => {
   $('#usage-totals').replaceChildren(
     ...[['Calls', n(t.calls)], ['Tokens in', n(t.inputTokens)], ['Tokens out', n(t.outputTokens)], ['Reported cost (API-equivalent)', `$${t.costUsd.toFixed(4)}`]]
       .map(([k, v]) => h('div', { class: 'card' }, h('div', { class: 'k' }, k), h('div', { class: 'v' }, v))));
-  $('#usage-caps').replaceChildren(u.caps.length
-    ? h('div', { class: 'share' }, u.caps.map((c) => h('div', { class: 'share-row' }, h('span', { class: 'nm', title: `${c.scope} ${c.name} · ${c.metric}` }, `${c.name} · ${c.metric}`), capBar(c), h('span', { class: 'val' }, `${n(c.used)} / ${n(c.limit)}`))))
-    : h('p', { class: 'muted' }, 'No budgets configured.'));
+  $('#usage-caps').replaceChildren(capList(u));
   $('#usage-conn').replaceChildren(shareList(u.byConnector, 'By model'));
   $('#usage-route').replaceChildren(shareList(u.byTaskType, 'By route'));
 };
@@ -1112,25 +1118,152 @@ function runStreamed(path, body, out, stopBtn, runBtn) {
     .catch((err) => out.append(h('span', { class: 'err' }, `\n[${err.name === 'AbortError' ? 'stopped' : err.message}]`)))
     .finally(() => { termAbort = null; stopBtn.hidden = true; runBtn.disabled = false; });
 }
+// Interactive terminal: persistent shells (see src/terminal.mjs). Output replays from the server on reload.
+const terms = new Map(); // id -> { id, shell, cwd, chunks, chars, seq, busy, dead, hist, histAt }
+let activeTerm = null;
+const ANSI = /\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07]*(\x07|\x1b\\)/g;
 const termHist = JSON.parse(localStorage.getItem('homeai-term') || '[]');
-function renderTermHist() {
-  $('#term-hist').replaceChildren(...termHist.map((c) => h('button', { class: 'chip', type: 'button', title: 'Reuse', onclick: () => { $('#term-cmd').value = c; $('#term-cmd').focus(); } }, c.length > 48 ? `${c.slice(0, 47)}…` : c)));
+const termOut = () => $('#term-out');
+
+function termPush(t, cls, text) {
+  text = text.replace(ANSI, '').replace(/\r\n/g, '\n').replace(/\r/g, '');
+  if (!text) return;
+  t.chunks.push({ cls, text });
+  t.chars += text.length;
+  while (t.chars > 300_000 && t.chunks.length > 1) t.chars -= t.chunks.shift().text.length;
+  if (t === activeTerm) {
+    const out = termOut();
+    const stick = out.scrollHeight - out.scrollTop - out.clientHeight < 60;
+    out.append(cls ? h('span', { class: cls }, text) : text);
+    if (stick) out.scrollTop = out.scrollHeight;
+  }
 }
-$('#term-stop').addEventListener('click', () => termAbort?.abort());
-$('#term-clear').addEventListener('click', () => ($('#term-out').textContent = ''));
+function termRender() {
+  const t = activeTerm;
+  const out = termOut();
+  out.replaceChildren(...(t ? t.chunks.map((c) => (c.cls ? h('span', { class: c.cls }, c.text) : c.text)) : ['Open a terminal to start.']));
+  out.scrollTop = out.scrollHeight;
+  const cmd = $('#term-cmd');
+  cmd.disabled = !t || t.dead;
+  $('#term-prompt').textContent = t ? `${t.cwd}${t.busy ? ' …' : ' >'}` : '>';
+  $('#term-tabs').replaceChildren(...[...terms.values()].map((x, i) => h('button', { class: `term-tab${x === t ? ' active' : ''}${x.dead ? ' dead' : ''}`, title: x.cwd, onclick: () => { activeTerm = x; termRender(); cmd.focus(); } }, `${i + 1}: ${x.shell}`)));
+  for (const id of ['#term-interrupt', '#term-close']) $(id).disabled = !t;
+}
+
+// Follows one session's SSE stream (GET), reconnecting from the last seen sequence number.
+async function termAttach(t) {
+  while (!t.dead && terms.has(t.id)) {
+    try {
+      await bootstrapToken();
+      const res = await fetch(`/api/terminal/${t.id}/stream?since=${t.seq}`, { headers: token ? { authorization: `Bearer ${token}` } : {}, signal: t.abort.signal });
+      if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      let buf = '';
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        let i;
+        while ((i = buf.indexOf('\n\n')) >= 0) {
+          const line = buf.slice(0, i).split('\n').find((l) => l.startsWith('data: '));
+          buf = buf.slice(i + 2);
+          if (line) termEvent(t, JSON.parse(line.slice(6)));
+        }
+      }
+    } catch (err) {
+      if (err.name === 'AbortError') return;
+    }
+    if (t.dead) return;
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+}
+function termEvent(t, ev) {
+  if (ev.type === 'error') { t.dead = true; termPush(t, 'err', `\n[${ev.error}]\n`); termRender(); return; }
+  if (ev.seq) t.seq = Math.max(t.seq, ev.seq);
+  if (ev.type === 'out') termPush(t, ev.stream === 'stderr' ? 'err' : '', ev.text);
+  else if (ev.type === 'notice') termPush(t, 'notice', ev.text);
+  else if (ev.type === 'cwd') { t.cwd = ev.cwd; t.busy = false; if (t === activeTerm) termRender(); }
+  else if (ev.type === 'exit') {
+    t.dead = true;
+    termPush(t, 'err', `\n[shell exited${ev.code != null ? ` with code ${ev.code}` : ''}${ev.error ? `: ${ev.error}` : ''}]\n`);
+    t.abort.abort();
+    if (ev.closed) terms.delete(t.id);
+    if (activeTerm === t && ev.closed) activeTerm = [...terms.values()].pop() ?? null;
+    termRender();
+  }
+}
+function termAdd(s) {
+  if (terms.has(s.id)) return terms.get(s.id);
+  const t = { id: s.id, shell: s.shell, cwd: s.cwd, chunks: [], chars: 0, seq: 0, busy: false, dead: !!s.exited, abort: new AbortController() };
+  terms.set(s.id, t);
+  termAttach(t);
+  return t;
+}
+async function termNew() {
+  try {
+    const s = await api('/api/terminal', { method: 'POST', body: { cwd: $('#term-cwd').value.trim() || undefined, shell: $('#term-shell').value } });
+    activeTerm = termAdd(s);
+    termRender();
+    $('#term-cmd').focus();
+  } catch (err) { toast(err.message, 'bad'); }
+}
+const termSend = (t, body) => api(`/api/terminal/${t.id}/input`, { method: 'POST', body }).catch((e) => termPush(t, 'err', `[${e.message}]\n`));
+
+$('#term-new').addEventListener('click', termNew);
+$('#term-clear').addEventListener('click', () => { if (activeTerm) { activeTerm.chunks = []; activeTerm.chars = 0; termRender(); } });
+$('#term-interrupt').addEventListener('click', () => activeTerm && api(`/api/terminal/${activeTerm.id}/interrupt`, { method: 'POST', body: {} }).then(() => { activeTerm.busy = false; termRender(); }).catch((e) => toast(e.message, 'bad')));
+$('#term-close').addEventListener('click', () => activeTerm && api(`/api/terminal/${activeTerm.id}`, { method: 'DELETE' }).catch((e) => toast(e.message, 'bad')));
 $('#term-form').addEventListener('submit', (e) => {
   e.preventDefault();
-  const command = $('#term-cmd').value.trim();
-  if (!command) return;
-  const i = termHist.indexOf(command);
-  if (i >= 0) termHist.splice(i, 1);
-  termHist.unshift(command);
-  termHist.length = Math.min(termHist.length, 8);
-  localStorage.setItem('homeai-term', JSON.stringify(termHist));
-  renderTermHist();
-  runStreamed('/api/exec', { command, project: $('#term-project').value, cwd: $('#term-cwd').value.trim() || undefined }, $('#term-out'), $('#term-stop'), $('#term-run'));
+  const t = activeTerm;
+  const input = $('#term-cmd');
+  if (!t || t.dead) return;
+  const text = input.value;
+  input.value = '';
+  t.histAt = -1;
+  if (t.busy) {
+    // Something is running and may be waiting for this (a prompt or REPL), so send it as-is.
+    termPush(t, 'cmd', `${text}\n`);
+    termSend(t, { data: `${text}\n` });
+    return;
+  }
+  if (text.trim()) {
+    const i = termHist.indexOf(text);
+    if (i >= 0) termHist.splice(i, 1);
+    termHist.unshift(text);
+    termHist.length = Math.min(termHist.length, 100);
+    localStorage.setItem('homeai-term', JSON.stringify(termHist));
+  }
+  termPush(t, 'cmd', `${t.cwd}> ${text}\n`);
+  if (!text.trim()) return;
+  t.busy = true;
+  termRender();
+  termSend(t, { data: text, run: true });
 });
-loaders.terminal = async () => { await loadProjects(); renderTermHist(); };
+$('#term-cmd').addEventListener('keydown', (e) => {
+  const t = activeTerm;
+  if (!t) return;
+  const input = e.target;
+  if (e.ctrlKey && e.key.toLowerCase() === 'c' && input.selectionStart === input.selectionEnd) { e.preventDefault(); $('#term-interrupt').click(); }
+  else if (e.ctrlKey && e.key.toLowerCase() === 'l') { e.preventDefault(); $('#term-clear').click(); }
+  else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+    e.preventDefault();
+    t.histAt = Math.max(-1, Math.min(termHist.length - 1, (t.histAt ?? -1) + (e.key === 'ArrowUp' ? 1 : -1)));
+    input.value = t.histAt >= 0 ? termHist[t.histAt] : '';
+  }
+});
+termOut().addEventListener('click', () => { if (!getSelection().toString()) $('#term-cmd').focus(); });
+loaders.terminal = async () => {
+  await loadProjects();
+  const r = await api('/api/terminal');
+  if (!$('#term-cwd').value) $('#term-cwd').value = r.default ?? '';
+  for (const s of r.sessions) termAdd(s);
+  if (!activeTerm) activeTerm = [...terms.values()][0] ?? null;
+  if (!terms.size) await termNew();
+  else termRender();
+  $('#term-cmd').focus();
+};
 
 // ---- Projects & GitHub ----
 function gitBtn(p, action, label, extra) {
@@ -1366,6 +1499,50 @@ function toggleSidebar() {
 $('#collapse').addEventListener('click', toggleSidebar);
 $('#menu').addEventListener('click', toggleSidebar);
 $('#scrim').addEventListener('click', toggleSidebar);
+
+// ---- Conversation list: resizable and collapsible ----
+const RAIL = { min: 160, max: 520, def: 240 };
+const chatTab = $('#tab-chat');
+const railSplit = $('#rail-split');
+function applyRail() {
+  const w = Math.min(RAIL.max, Math.max(RAIL.min, Number(ui.railW) || RAIL.def));
+  chatTab.style.setProperty('--rail-w', `${w}px`);
+  chatTab.classList.toggle('rail-hidden', !!ui.railHidden);
+  railSplit.setAttribute('aria-valuenow', String(w));
+}
+function setRailWidth(w, persist) {
+  ui.railW = Math.round(Math.min(RAIL.max, Math.max(RAIL.min, w)));
+  applyRail();
+  if (persist) saveUi();
+}
+railSplit.addEventListener('pointerdown', (e) => {
+  e.preventDefault();
+  railSplit.setPointerCapture(e.pointerId);
+  railSplit.classList.add('drag');
+  document.body.classList.add('resizing');
+  const left = $('.rail').getBoundingClientRect().left;
+  const move = (ev) => setRailWidth(ev.clientX - left, false);
+  const up = () => {
+    railSplit.classList.remove('drag');
+    document.body.classList.remove('resizing');
+    railSplit.removeEventListener('pointermove', move);
+    railSplit.removeEventListener('pointerup', up);
+    railSplit.removeEventListener('pointercancel', up);
+    saveUi();
+  };
+  railSplit.addEventListener('pointermove', move);
+  railSplit.addEventListener('pointerup', up);
+  railSplit.addEventListener('pointercancel', up);
+});
+railSplit.addEventListener('dblclick', () => setRailWidth(RAIL.def, true));
+railSplit.addEventListener('keydown', (e) => {
+  const step = e.shiftKey ? 40 : 12;
+  const cur = Number(ui.railW) || RAIL.def;
+  if (e.key === 'ArrowLeft') { e.preventDefault(); setRailWidth(cur - step, true); }
+  else if (e.key === 'ArrowRight') { e.preventDefault(); setRailWidth(cur + step, true); }
+});
+$('#rail-toggle').addEventListener('click', () => { ui.railHidden = !ui.railHidden; saveUi(); applyRail(); });
+applyRail();
 
 // ---- Command palette ----
 let palIdx = 0;

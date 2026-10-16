@@ -85,12 +85,17 @@ export function parseClaudeJson(stdout) {
   if (r === null || typeof r !== 'object') throw new Error('Claude output is not a JSON object');
   // Prompt-cache reads/writes count fully toward input: that is what subscription limits consume.
   const u = r.usage ?? {};
+  // Tool calls Claude was refused (usually a folder outside the allowed ones). Reported so the UI can offer to grant access.
+  const denials = Array.isArray(r.permission_denials)
+    ? r.permission_denials.map((d) => ({ tool: String(d?.tool_name ?? ''), path: d?.tool_input?.file_path ?? d?.tool_input?.path ?? undefined, command: typeof d?.tool_input?.command === 'string' ? d.tool_input.command.slice(0, 300) : undefined }))
+    : [];
   return {
     text: typeof r.result === 'string' ? r.result : '',
     inputTokens: num(u.input_tokens) + num(u.cache_creation_input_tokens) + num(u.cache_read_input_tokens),
     outputTokens: num(r.usage?.output_tokens),
     costUsd: Number.isFinite(r.total_cost_usd) ? r.total_cost_usd : null,
     ok: r.is_error !== true,
+    ...(denials.length ? { denials } : {}),
   };
 }
 

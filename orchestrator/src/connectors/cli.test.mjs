@@ -81,3 +81,16 @@ test('ollama brief requests turn thinking off and cap the output', () => {
   assert.deepEqual([body.think, body.options], [false, { temperature: 0, num_predict: 8 }]);
   assert.equal(buildOllamaRequest({ model: 'm', prompt: 'p' }).body.think, undefined);
 });
+
+test('parseClaudeJson reports refused tool calls so the UI can offer access', () => {
+  const out = parseClaudeJson(JSON.stringify({ result: 'blocked', is_error: false, permission_denials: [{ tool_name: 'Read', tool_input: { file_path: 'E:\Data\a.txt' } }, { tool_name: 'Bash', tool_input: { command: 'dir E:\Data' } }] }));
+  assert.deepEqual(out.denials, [{ tool: 'Read', path: 'E:\Data\a.txt', command: undefined }, { tool: 'Bash', path: undefined, command: 'dir E:\Data' }]);
+  assert.equal(parseClaudeJson(JSON.stringify({ result: 'x' })).denials, undefined);
+});
+
+test('buildClaudeArgs and buildCodexArgs pass extra folders through', () => {
+  const c = buildClaudeArgs({ prompt: 'p', model: 'm', addDirs: ['E:\Data'] });
+  assert.deepEqual(c.slice(c.indexOf('--add-dir')), ['--add-dir', 'E:\Data']);
+  const x = buildCodexArgs({ prompt: 'p', model: 'm', addDirs: ['E:\Data'] });
+  assert.ok(x.join(' ').includes('--add-dir E:\Data'));
+});

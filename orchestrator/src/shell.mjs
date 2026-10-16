@@ -5,6 +5,7 @@ import { spawn } from 'node:child_process';
 import { existsSync, statSync } from 'node:fs';
 import { isAbsolute, resolve, relative } from 'node:path';
 import { killTree, cancelled, STRIPPED_ENV } from './connectors/run.mjs';
+import { validateCwd } from './terminal.mjs';
 
 const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 const argv = (v) => Array.isArray(v) && v.length > 0 && v.every((s) => typeof s === 'string' && s);
@@ -129,7 +130,8 @@ export function createShell({ config, gitBin = 'git', spawnImpl = spawn, audit, 
       if (typeof command !== 'string' || !command.trim()) throw new Error('command must be a non-empty string');
       if (ONEDRIVE.test(command)) throw new Error('Commands that mention OneDrive are refused');
       if (!Number.isInteger(timeoutMs) || timeoutMs < 1000 || timeoutMs > 1_800_000) throw new Error('timeoutMs must be 1000-1800000');
-      const dir = resolveCwd({ project: name, cwd });
+      // An absolute cwd may point anywhere (admin only); a relative one stays inside the project.
+      const dir = typeof cwd === 'string' && isAbsolute(cwd) ? validateCwd(cwd) : resolveCwd({ project: name, cwd });
       const [cmd, args] = platform === 'win32'
         ? ['powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(command, 'utf16le').toString('base64')]]
         : ['sh', ['-c', command]];

@@ -15,11 +15,13 @@ import { createAttachmentStore } from './attachments.mjs';
 import { createMemoryStore } from './memory.mjs';
 import { createAuth, loadOrCreateToken } from './access.mjs';
 import { createShell } from './shell.mjs';
+import { createTerminals } from './terminal.mjs';
 import { createGithub } from './github.mjs';
 import { createVault } from './vault.mjs';
 import { createConnections } from './connections.mjs';
 import { rotateIfLarge } from './rotate.mjs';
 import { createJobs, JOB_SYSTEM } from './jobs.mjs';
+import { createGrants, checkFolder } from './grants.mjs';
 import { startServer } from './server.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -72,13 +74,27 @@ const shell = projectsConfig
       },
     })
   : null;
+// Interactive terminals for the WebUI: persistent shells, any folder, audited into the same exec log.
+const terminals = projectsConfig
+  ? createTerminals({
+      defaultCwd: projectsConfig.projects[projectsConfig.default]?.path,
+      audit: (e) => {
+        rotateIfLarge(execLog, 5_000_000);
+        appendFileSync(execLog, JSON.stringify(e) + '\n');
+      },
+    })
+  : null;
 // Account logins: encrypted with Windows DPAPI in data/vault.json (gitignored). The GitHub client prefers a saved login
 // over Git Credential Manager, so connecting in the WebUI gives the orchestrator persistent access.
 const vault = await createVault({ file: join(dataDir, 'vault.json') });
 const connections = createConnections({ vault, config: optionalJson(files.connections, {}) });
 const github = projectsConfig?.github ? createGithub({ repo: projectsConfig.github, gitBin, tokenSource: () => connections.getSecret('github') }) : null;
 
+// Standing folder permissions ("always allow"); every agent run gets these in addition to its project folder.
+const grants = createGrants({ file: join(dataDir, 'grants.json') });
+
 const orchestrator = createOrchestrator({
+  dirsFor: (o) => grants.dirs(o),
   config: readJson(files.routes),
   caps: readJson(files.budgets),
   store: createLedgerStore(join(dataDir, 'ledger.jsonl')),
@@ -118,6 +134,8 @@ scheduler.start();
 const jobs = createJobs({
   file: join(dataDir, 'jobs.json'),
   concurrency: 2,
+  vetFolder: (p) => checkFolder(p),
+  grantAlways: (p) => grants.add({ path: p, note: 'Granted from a job request' }),
   run: async ({ job, step, prompt, signal, onEvent }) => {
     const cfg = orchestrator.config;
     const route = step === 'plan' ? cfg.auto?.plan ?? 'plan' : job.route ?? cfg.auto?.act ?? 'agent';
@@ -127,8 +145,8 @@ const jobs = createJobs({
       if (!shell) return { ok: false, error: 'Shell access is not enabled, so this job cannot run commands' };
       cwd = shell.resolveCwd({ project: job.project });
     }
-    const r = await orchestrator.task({ taskType: route, prompt, system: JOB_SYSTEM, source: 'job', cwd, signal, onEvent });
-    return { ok: r.ok, text: r.text, error: r.error, connector: r.connector, model: r.model, taskId: r.id, inputTokens: r.attempts?.reduce((s, a) => s + (a.inputTokens ?? 0), 0), outputTokens: r.attempts?.reduce((s, a) => s + (a.outputTokens ?? 0), 0) };
+    const r = await orchestrator.task({ taskType: route, prompt, system: JOB_SYSTEM, source: 'job', cwd, addDirs: job.grants ?? [], signal, onEvent });
+    return { ok: r.ok, text: r.text, denials: r.denials, error: r.error, connector: r.connector, model: r.model, taskId: r.id, inputTokens: r.attempts?.reduce((s, a) => s + (a.inputTokens ?? 0), 0), outputTokens: r.attempts?.reduce((s, a) => s + (a.outputTokens ?? 0), 0) };
   },
 });
 jobs.start();
@@ -148,10 +166,12 @@ await startServer({
   orchestrator,
   scheduler,
   jobs,
+  grants,
   conversations,
   attachments,
   memory,
   shell,
+  terminals,
   github,
   connections,
   auth,

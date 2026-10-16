@@ -180,3 +180,27 @@ test('a failed approval run leaves the plan approvable; a normal reply after it 
   await o.chat({ conversationId: id, prompt: 'actually, never mind', taskType: 'general' });
   assert.equal(o.approvalFor(id), null);
 });
+
+test('conversation notes reach the model on later turns; extra folders reach agent runs', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'notes-'));
+  const conversations = createConversationStore(dir);
+  const calls = [];
+  const o = createOrchestrator({
+    config,
+    conversations,
+    dirsFor: ({ readOnly }) => (readOnly ? ['R:\ro'] : ['W:\rw']),
+    run: async (e, opts) => (calls.push(opts), ok('reply')),
+  });
+  const first = await o.chat({ prompt: 'hello', taskType: 'plain' });
+  const id = first.conversation.id;
+  conversations.addNote(id, 'always answer in French');
+  await o.chat({ conversationId: id, prompt: 'again', taskType: 'plain' });
+  assert.doesNotMatch(calls[0].system ?? '', /French/);
+  assert.match(calls[1].system, /always answer in French/);
+  assert.throws(() => conversations.addNote(id, ' '), /non-empty/);
+  const [n] = conversations.get(id).notes;
+  conversations.removeNote(id, n.id);
+  assert.equal(conversations.get(id).notes.length, 0);
+  await o.task({ taskType: 'agent', prompt: 'do', cwd: 'D:\p', addDirs: ['X:\once'] });
+  assert.deepEqual(calls.at(-1).addDirs, ['X:\once', 'W:\rw']);
+});

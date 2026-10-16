@@ -43,3 +43,32 @@ test('jobs API is 404 when the feature is off', async () => {
   assert.equal(res.status, 404);
   s.close();
 });
+
+test('notes, access decisions and standing grants over the API', async () => {
+  const saved = [];
+  const j2 = createJobs({ run: async ({ job }) => ({ ok: true, text: job.grants.length ? 'ok' : 'NEEDS_ACCESS: D:\Games | saves' }), retryDelayMs: 1, grantAlways: (p) => saved.push(p) });
+  const store = [];
+  const grants = { list: () => store, add: ({ path }) => { const f = { id: `g${store.length + 1}`, path, write: true }; store.push(f); return f; }, remove: (id) => { if (!store.some((f) => f.id === id)) throw new Error('Grant not found'); store.splice(0, store.length, ...store.filter((f) => f.id !== id)); } };
+  const s = await startServer({ orchestrator: { config: { connectors: {}, routes: {}, default: 'x' }, isAgentRoute: () => false, queue: () => ({}) }, jobs: j2, grants, shell }, { port: 0 });
+  const b = `http://127.0.0.1:${s.address().port}`;
+  const go = async (method, path, body) => {
+    const res = await fetch(b + path, { method, headers: body ? { 'content-type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined });
+    return { status: res.status, body: await res.json() };
+  };
+  const q = await go('POST', '/api/jobs', { prompt: 'save games' });
+  await j2.idle();
+  assert.equal((await go('GET', `/api/jobs/${q.body.id}`)).body.status, 'needs-access');
+  assert.equal((await go('POST', `/api/jobs/${q.body.id}/access`, { decision: 'maybe' })).status, 400);
+  assert.equal((await go('POST', `/api/jobs/${q.body.id}/notes`, { text: '' })).status, 400);
+  assert.equal((await go('POST', `/api/jobs/${q.body.id}/notes`, { text: 'be quick' })).status, 200);
+  assert.equal((await go('POST', `/api/jobs/${q.body.id}/access`, { decision: 'always' })).status, 200);
+  await j2.idle();
+  assert.equal((await go('GET', `/api/jobs/${q.body.id}`)).body.status, 'done');
+  assert.deepEqual(saved, ['D:\Games']);
+  const added = await go('POST', '/api/access', { path: 'D:\Music' });
+  assert.equal(added.body.path, 'D:\Music');
+  assert.equal((await go('GET', '/api/access')).body.folders.length, 1);
+  assert.equal((await go('DELETE', `/api/access/${added.body.id}`)).status, 200);
+  assert.equal((await go('DELETE', '/api/access/zzz')).status, 404);
+  s.close();
+});
