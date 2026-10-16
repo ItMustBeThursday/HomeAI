@@ -136,6 +136,13 @@ export const TOOLS = {
       return `Saved note ${n.id}.`;
     },
   },
+  connections: {
+    description: 'List account connections (GitHub etc.): which are logged in and as whom. Never shows credentials.',
+    schema: obj({}),
+    async run(a, api) {
+      return (await api('GET', '/api/connections')).connections.map((c) => `${c.name}: ${c.connected ? `connected as ${c.account}` : c.needsLogin ? 'needs a new login' : 'not connected'}`).join(String.fromCharCode(10));
+    },
+  },
   github: {
     description: 'GitHub for the HomeAI repo: summary (latest commits, workflow runs), issues (open/closed/all), or runs.',
     schema: obj({ what: { type: 'string', enum: ['summary', 'issues', 'runs'] }, state: { type: 'string', enum: ['open', 'closed', 'all'] } }, ['what']),

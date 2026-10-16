@@ -23,6 +23,7 @@ function h(tag, attrs = {}, ...kids) {
 
 // ---- Icons (static markup only) ----
 const ICONS = {
+  plug: '<path d="M9 3v5M15 3v5M6 8h12v4a6 6 0 0 1-12 0zM12 18v3"/>',
   chat: '<path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/>',
   grid: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
   terminal: '<path d="M4 5h16v14H4z"/><path d="M7 10l3 2-3 2M12 15h5"/>',
@@ -267,6 +268,7 @@ const TABS = [
   { id: 'status', label: 'Status', icon: 'pulse', group: 'Observe' },
   { id: 'schedule', label: 'Schedule', icon: 'calendar', group: 'Observe' },
   { id: 'config', label: 'Config', icon: 'cog', group: 'Admin' },
+  { id: 'connections', label: 'Connections', icon: 'plug', group: 'Admin', feature: 'connections', admin: true },
   { id: 'devices', label: 'Devices', icon: 'devices', group: 'Admin', feature: 'devices', admin: true },
   { id: 'logan', label: 'Logan', icon: 'tv', group: 'Admin' },
 ];
@@ -274,7 +276,7 @@ const TITLES = { ...Object.fromEntries(TABS.map((t) => [t.id, t.label])), settin
 const SUBS = {
   chat: 'Route-aware conversations', overview: 'Everything at a glance', terminal: 'PowerShell in a project folder', projects: 'Tests, git and GitHub',
   memory: 'Durable facts the models can see', usage: 'Tokens, calls and budgets', history: 'Every task and its fallbacks', status: 'Backend and model health',
-  schedule: 'Timed jobs and the request queue', config: 'Routes, connectors and budgets', devices: 'Tokens for phones and displays', logan: 'Menu catalog (coming)', settings: 'Appearance and shortcuts',
+  schedule: 'Timed jobs and the request queue', config: 'Routes, connectors and budgets', connections: 'Logins for GitHub and other services', devices: 'Tokens for phones and displays', logan: 'Menu catalog (coming)', settings: 'Appearance and shortcuts',
 };
 
 function buildNav() {
@@ -325,16 +327,22 @@ async function health() {
 // ---- Config cache ----
 let config = null;
 let whoami = null;
-// Chats on this PC start on the agent route so they can run commands and edit files; limited devices use the default.
+// Chats on this PC start on "auto": a cheap check on each message picks answer / do / plan. Limited devices use the default.
+const canAct = () => config.features.shell && whoami?.scopes.includes('admin');
+const routeExists = (r) => !!config && (r === 'auto' ? !!config.auto : Object.hasOwn(config.routes, r));
 function startRoute() {
-  return config.routes.agent && config.features.shell && whoami?.scopes.includes('admin') ? 'agent' : config.default;
+  if (!canAct()) return config.default;
+  return config.auto ? 'auto' : config.routes.agent ? 'agent' : config.default;
 }
 async function loadConfig() {
   config = await api('/api/config');
   const route = $('#route');
   const prevRoute = route.value;
-  route.replaceChildren(...Object.keys(config.routes).map((r) => h('option', { value: r }, r === config.default ? `${r} (default)` : r)));
-  route.value = prevRoute && config.routes[prevRoute] ? prevRoute : startRoute();
+  route.replaceChildren(
+    ...(config.auto ? [h('option', { value: 'auto' }, 'auto (checks each message)')] : []),
+    ...Object.keys(config.routes).map((r) => h('option', { value: r }, r === config.default ? `${r} (default)` : r)),
+  );
+  route.value = prevRoute && routeExists(prevRoute) ? prevRoute : startRoute();
   const pin = $('#pin');
   const prevPin = pin.value;
   pin.replaceChildren(h('option', { value: '' }, 'Auto (route chain)'), ...Object.entries(config.connectors).map(([name, c]) => h('option', { value: name }, `${name} — ${c.model}`)));
@@ -380,7 +388,8 @@ function botMeta(m) {
   const meta = h('div', { class: 'meta' });
   const bits = [];
   if (m.connector) bits.push(h('span', { class: 'pill' }, `${m.connector} · ${m.model}`));
-  if (m.taskType) bits.push(h('span', {}, `route ${m.taskType}`));
+  if (m.auto) bits.push(h('span', { title: `${m.auto.via === 'model' ? 'Decided by the local check model' : m.auto.via === 'rule' ? 'Decided by a rule' : 'Check failed; used the fallback'}: ${m.auto.reason}` }, `auto → ${m.taskType}`));
+  else if (m.taskType) bits.push(h('span', {}, `route ${m.taskType}`));
   if (m.ms != null) bits.push(h('span', {}, secs(m.ms)));
   const t = sum(m.attempts);
   if (t) bits.push(h('span', {}, `${n(t)} tokens`));
@@ -390,6 +399,7 @@ function botMeta(m) {
   }
   return meta;
 }
+const routedLabel = (ev) => ({ chat: 'Answering', act: 'Doing it', plan: 'Planning first', approve: 'Running the approved plan' })[ev.kind] ?? `Route ${ev.route}`;
 function attemptLine(a) {
   const state = a.skipped ? `skipped: ${a.skipped}` : a.ok ? `ok in ${secs(a.ms)}` : `failed in ${secs(a.ms)}: ${a.error}`;
   return `${a.connector} (${a.model}) — ${state}`;
@@ -507,7 +517,7 @@ async function openConversation(id) {
   msgs = [];
   if (id) {
     const conv = await api(`/api/conversations/${encodeURIComponent(id)}`);
-    if (conv.taskType && config?.routes[conv.taskType]) $('#route').value = conv.taskType;
+    if (conv.taskType && routeExists(conv.taskType)) { $('#route').value = conv.taskType; syncProjectPicker(); }
     msgs = conv.messages.map((m) => ({ ...m }));
     setHead(conv.title);
   } else {
@@ -607,7 +617,7 @@ const SLASH = [
   { cmd: '/go', desc: 'Open a page: /go usage', arg: true, run: (a) => show(a) },
 ];
 function setRoute(name) {
-  if (!config?.routes[name]) return toast(`Unknown route "${name}". Routes: ${Object.keys(config?.routes ?? {}).join(', ')}`, 'bad');
+  if (!routeExists(name)) return toast(`Unknown route "${name}". Routes: ${[...(config?.auto ? ['auto'] : []), ...Object.keys(config?.routes ?? {})].join(', ')}`, 'bad');
   $('#route').value = name;
   syncProjectPicker();
   toast(`Route: ${name}`, 'ok');
@@ -718,7 +728,9 @@ async function send(text, { approve = false } = {}) {
           images: images.length ? images : undefined, project: $('#project-label').hidden ? undefined : $('#project').value || undefined,
         };
     const r = await stream('/api/chat', req, (ev) => {
-      if (ev.type === 'attempt') { acc = ''; tools.replaceChildren(); status.textContent = `${ev.connector} · ${ev.model}…`; paint(); }
+      if (ev.type === 'routing') status.textContent = 'Checking what this needs…';
+      else if (ev.type === 'routed') status.textContent = `${routedLabel(ev)} · ${ev.reason}…`;
+      else if (ev.type === 'attempt') { acc = ''; tools.replaceChildren(); status.textContent = `${ev.connector} · ${ev.model}…`; paint(); }
       else if (ev.type === 'delta') { acc += ev.text; if (!raf) raf = requestAnimationFrame(paint); }
       else if (ev.type === 'tool') { tools.append(h('div', { class: 'tool' }, `${ev.name}${ev.summary ? `: ${ev.summary}` : ''}`)); scrollDown(); }
       else if (ev.type === 'attempt-failed') status.textContent = `${ev.connector} failed (${ev.error}); trying next…`;
@@ -756,7 +768,8 @@ async function send(text, { approve = false } = {}) {
 $('#composer').addEventListener('submit', (e) => { e.preventDefault(); send($('#prompt').value); });
 
 function syncProjectPicker() {
-  const agent = !!config?.routes[$('#route').value]?.agent;
+  const r = $('#route').value;
+  const agent = r === 'auto' ? !!config?.auto && canAct() : !!config?.routes[r]?.agent;
   $('#project-label').hidden = !agent || !config?.features.shell;
 }
 $('#route').addEventListener('change', syncProjectPicker);
@@ -1171,6 +1184,57 @@ $('#dev-form').addEventListener('submit', async (e) => {
   }
 });
 loaders.devices = loadDevices;
+
+// ---- Connections (account logins, kept encrypted on this PC) ----
+let devicePollTimer = null;
+function connCard(c) {
+  const state = c.connected ? h('span', { class: 'pill ok' }, `connected as ${c.account}`) : c.needsLogin ? h('span', { class: 'pill warn' }, 'needs a new login') : h('span', { class: 'pill' }, 'not connected');
+  const msg = h('span', { class: 'msg' });
+  const field = h('input', { type: 'password', autocomplete: 'off', placeholder: c.id === 'github' ? 'Personal access token (github_pat_… or ghp_…)' : 'Token or API key', size: 44, 'aria-label': `${c.name} token` });
+  const done = async (fn, okText) => {
+    msg.className = 'msg';
+    msg.textContent = 'Working…';
+    try { await fn(); msg.className = 'msg ok'; msg.textContent = okText; toast(okText, 'ok'); await loadConnections(); } catch (err) { msg.className = 'msg bad'; msg.textContent = err.message; }
+  };
+  const save = () => {
+    const secret = field.value;
+    field.value = '';
+    return done(() => api(`/api/connections/${encodeURIComponent(c.id)}`, { method: 'POST', body: { secret } }), `${c.name} connected`);
+  };
+  field.addEventListener('keydown', (e) => { if (e.key === 'Enter') save(); });
+  const device = h('div', { class: 'mt', hidden: true });
+  return h('div', { class: 'panel mt' },
+    h('div', { class: 'panel-head' }, h('h3', {}, c.name), state),
+    h('p', { class: 'muted' }, c.description),
+    h('div', { class: 'row' }, field, h('button', { class: 'primary', onclick: save }, c.connected ? 'Replace token' : 'Connect'),
+      c.deviceFlow ? h('button', { class: 'ghost', onclick: () => startDeviceLogin(device, msg) }, 'Sign in with GitHub') : null,
+      c.connected || c.needsLogin ? h('button', { class: 'ghost danger', onclick: async () => { if (confirm(`Disconnect ${c.name}? The saved login is deleted from this PC.`)) done(() => api(`/api/connections/${encodeURIComponent(c.id)}`, { method: 'DELETE' }), `${c.name} disconnected`); } }, 'Disconnect') : null,
+      msg),
+    device);
+}
+async function startDeviceLogin(box, msg) {
+  clearInterval(devicePollTimer);
+  try {
+    const d = await api('/api/connections/github/device', { method: 'POST', body: {} });
+    box.hidden = false;
+    box.replaceChildren(h('p', {}, 'Open ', h('a', { href: d.verificationUri, target: '_blank', rel: 'noopener' }, d.verificationUri), ' and enter this code:'), h('p', { class: 'mono big' }, d.userCode), h('p', { class: 'muted' }, 'Waiting for you to approve…'));
+    let every = Math.max(d.interval, 5) * 1000;
+    const tick = async () => {
+      try {
+        const r = await api('/api/connections/github/device/poll', { method: 'POST', body: {} });
+        if (r.status === 'connected') { box.hidden = true; toast(`GitHub connected as ${r.account}`, 'ok'); loadConnections(); return; }
+        if (r.slowDown) every += 5000;
+        devicePollTimer = setTimeout(tick, every);
+      } catch (err) { box.hidden = true; msg.className = 'msg bad'; msg.textContent = err.message; }
+    };
+    devicePollTimer = setTimeout(tick, every);
+  } catch (err) { msg.className = 'msg bad'; msg.textContent = err.message; }
+}
+async function loadConnections() {
+  const { connections } = await api('/api/connections');
+  $('#conn-list').replaceChildren(...connections.map(connCard));
+}
+loaders.connections = loadConnections;
 
 // ---- Settings ----
 const SHORTCUTS = [

@@ -8,6 +8,7 @@ import { createTaskHistory, createConversationStore } from './history.mjs';
 import { createConfigWriter } from './configfiles.mjs';
 import { createStatusChecker } from './status.mjs';
 import { createRunner } from './connectors/run.mjs';
+import { OLLAMA_URL } from './connectors/cli.mjs';
 import { createLimiter } from './limiter.mjs';
 import { createScheduler } from './scheduler.mjs';
 import { createAttachmentStore } from './attachments.mjs';
@@ -15,6 +16,8 @@ import { createMemoryStore } from './memory.mjs';
 import { createAuth, loadOrCreateToken } from './access.mjs';
 import { createShell } from './shell.mjs';
 import { createGithub } from './github.mjs';
+import { createVault } from './vault.mjs';
+import { createConnections } from './connections.mjs';
 import { rotateIfLarge } from './rotate.mjs';
 import { startServer } from './server.mjs';
 
@@ -28,6 +31,7 @@ const files = {
   routes: env.HOMEAI_ORCH_ROUTES ?? join(root, 'config', 'routes.json'),
   budgets: env.HOMEAI_ORCH_BUDGETS ?? join(root, 'config', 'budgets.json'),
   projects: env.HOMEAI_ORCH_PROJECTS ?? join(root, 'config', 'projects.json'),
+  connections: env.HOMEAI_ORCH_CONNECTIONS ?? join(root, 'config', 'connections.json'),
   network: env.HOMEAI_ORCH_NETWORK ?? join(root, 'config', 'network.json'),
 };
 const dataDir = env.HOMEAI_ORCH_DATA ?? join(root, 'data');
@@ -67,7 +71,11 @@ const shell = projectsConfig
       },
     })
   : null;
-const github = projectsConfig?.github ? createGithub({ repo: projectsConfig.github, gitBin }) : null;
+// Account logins: encrypted with Windows DPAPI in data/vault.json (gitignored). The GitHub client prefers a saved login
+// over Git Credential Manager, so connecting in the WebUI gives the orchestrator persistent access.
+const vault = await createVault({ file: join(dataDir, 'vault.json') });
+const connections = createConnections({ vault, config: optionalJson(files.connections, {}) });
+const github = projectsConfig?.github ? createGithub({ repo: projectsConfig.github, gitBin, tokenSource: () => connections.getSecret('github') }) : null;
 
 const orchestrator = createOrchestrator({
   config: readJson(files.routes),
@@ -79,6 +87,10 @@ const orchestrator = createOrchestrator({
   run,
   // One request at a time per Ollama GPU; two at a time per CLI so parallel calls queue instead of thrashing.
   limiter: createLimiter({ limits: { ollama: 1, 'claude-cli': 2, 'codex-cli': 2 } }),
+  loadedModels: async () => {
+    const res = await fetch(`${new URL(ollamaUrl ?? OLLAMA_URL).origin}/api/ps`, { signal: AbortSignal.timeout(1000) });
+    return new Set(((await res.json()).models ?? []).map((m) => m.name));
+  },
 });
 
 // Scheduler (off unless config/schedule.json has "enabled": true). Run log: data/schedule.jsonl.
@@ -121,6 +133,7 @@ await startServer({
   memory,
   shell,
   github,
+  connections,
   auth,
   network,
   tokenFile: env.HOMEAI_ORCH_TOKEN ? undefined : tokenFile,

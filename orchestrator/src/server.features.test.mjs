@@ -12,6 +12,8 @@ import { createAttachmentStore } from './attachments.mjs';
 import { createMemoryStore } from './memory.mjs';
 import { createShell } from './shell.mjs';
 import { PNG } from './attachments.test.mjs';
+import { createVault } from './vault.mjs';
+import { createConnections } from './connections.mjs';
 
 const config = {
   connectors: { a: { kind: 'ollama', model: 'm', vision: true }, c: { kind: 'claude-cli', model: 'sonnet' } },
@@ -21,6 +23,7 @@ const config = {
     agent: { chain: ['c'], agent: true, tools: ['Bash'] },
     plan: { chain: ['c'], agent: true, readOnly: true, then: 'agent', tools: ['Read'] },
   },
+  auto: { chat: 'quick', act: 'agent', plan: 'plan', check: 'a' },
   default: 'quick',
 };
 const ADMIN = 'adm-' + 'x'.repeat(30);
@@ -49,6 +52,8 @@ before(async () => {
     conversations,
     history: createTaskHistory(join(dir, 't.jsonl')),
     run: async (entry, { prompt, images, cwd, signal, onEvent }) => {
+      // The auto-route check: questions about capitals are CHAT, everything else ACT.
+      if (prompt.startsWith('Classify the LAST user message')) return { ok: true, text: /capital/.test(prompt.split('LAST user message:')[1]) ? 'CHAT' : 'ACT', inputTokens: 5, outputTokens: 1 };
       runs.push({ entry, prompt, images, cwd });
       onEvent?.({ type: 'delta', text: 'he' });
       onEvent?.({ type: 'delta', text: 'llo' });
@@ -75,8 +80,12 @@ before(async () => {
     createIssue: async (i) => (githubCalls.push(['create', i]), { number: 1, title: i.title }),
     comment: async () => ({ id: 1 }),
   };
+  const connections = createConnections({
+    vault: await createVault({ file: join(dir, 'vault.json'), codec: { protect: async (s) => s, unprotect: async (s) => s } }),
+    fetchImpl: async (url, init) => ({ ok: init.headers.authorization === 'Bearer good', status: init.headers.authorization === 'Bearer good' ? 200 : 401, json: async () => ({ login: 'adam' }) }),
+  });
   server = await startServer({
-    orchestrator, conversations, auth, attachments: createAttachmentStore(join(dir, 'att')), memory: createMemoryStore(join(dir, 'mem')), shell, github,
+    orchestrator, conversations, auth, connections, attachments: createAttachmentStore(join(dir, 'att')), memory: createMemoryStore(join(dir, 'mem')), shell, github,
     network: {}, tokenFile: join(dir, 'token.txt'), webDir, version: '1.2.3',
   }, { port: 0 });
   port = server.address().port;
@@ -223,6 +232,43 @@ test('plan then approve: approval is admin-only, runs the then route in the plan
   assert.match(again.json.error, /no plan waiting/);
 });
 
+test('auto chats check every message: answer, do, plan, and "yes" approves a pending plan', async () => {
+  const q = await call('POST', '/api/chat', { body: { prompt: 'what is the capital of France?', taskType: 'auto' } });
+  assert.equal(q.status, 200);
+  assert.equal(q.json.reply.taskType, 'quick');
+  assert.equal(q.json.reply.auto.via, 'model');
+  const id = q.json.conversation.id;
+  // No taskType: the conversation is an auto one, so the next message is checked again.
+  const act = await call('POST', '/api/chat', { body: { conversationId: id, prompt: 'run the tests and tell me what fails' } });
+  assert.equal(act.json.reply.taskType, 'agent');
+  assert.equal(runs.at(-1).cwd, projectDir);
+  const rule = await call('POST', '/api/chat', { body: { conversationId: id, prompt: 'show me D:\\HomeAI\\notes' } });
+  assert.deepEqual([rule.json.reply.taskType, rule.json.reply.auto.via], ['agent', 'rule']);
+  const plan = await call('POST', '/api/chat', { body: { conversationId: id, prompt: 'reorganise the project folders' } });
+  assert.deepEqual([plan.json.reply.taskType, plan.json.reply.plan], ['plan', true]);
+  assert.equal(runs.at(-1).entry.readOnly, true);
+  const yes = await call('POST', '/api/chat', { body: { conversationId: id, prompt: 'yes, go ahead' } });
+  assert.equal(yes.json.reply.taskType, 'agent');
+  assert.match(runs.at(-1).prompt, /Approved plan:\nhello/);
+  assert.equal(yes.json.reply.auto.reason, 'go-ahead on a pending plan');
+  const conv = await call('GET', `/api/conversations/${id}`);
+  assert.equal(conv.json.taskType, 'auto');
+  assert.equal(conv.json.messages.at(-2).approved, true);
+});
+
+test('auto: devices that cannot run commands always get the chat route; streams report the decision', async () => {
+  const phone = await call('POST', '/api/chat', { token: chatToken, body: { prompt: 'run the tests', taskType: 'auto' } });
+  assert.equal(phone.status, 200);
+  assert.equal(phone.json.reply.taskType, 'quick');
+  assert.equal(phone.json.reply.auto.reason, 'this device cannot run commands');
+  const s = await sse('/api/chat', { prompt: 'check disk space', taskType: 'auto', stream: true });
+  const routed = s.events.find((e) => e.type === 'routed');
+  assert.ok(s.events.some((e) => e.type === 'routing'));
+  assert.deepEqual([routed.kind, routed.route], ['act', 'agent']);
+  assert.equal(s.events.at(-1).type, 'done');
+  assert.equal(s.events.at(-1).reply.taskType, 'agent');
+});
+
 test('exec, test and git are admin-only; exec streams output', { skip: process.platform !== 'win32' }, async () => {
   assert.equal((await call('POST', '/api/exec', { token: chatToken, body: { command: 'echo hi' } })).status, 403);
   const r = await call('POST', '/api/exec', { body: { command: 'Write-Output "from-api"' } });
@@ -272,6 +318,23 @@ test('GitHub endpoints: reads need read scope; creating issues needs admin', asy
   assert.deepEqual(githubCalls[0], ['issues', 'closed']);
   assert.equal((await call('POST', '/api/github/issues', { token: chatToken, body: { title: 't' } })).status, 403);
   assert.equal((await call('POST', '/api/github/issues', { body: { title: 't' } })).json.number, 1);
+});
+
+test('connections: anyone with read can see state, only admin can log in or out, secrets never come back', async () => {
+  assert.equal((await call('GET', '/api/connections', { token: readToken })).json.connections[0].connected, false);
+  assert.equal((await call('POST', '/api/connections/github', { token: chatToken, body: { secret: 'good' } })).status, 403);
+  assert.equal((await call('POST', '/api/connections/github', { body: { secret: 'bad' } })).status, 400);
+  const ok = await call('POST', '/api/connections/github', { body: { secret: 'good' } });
+  assert.equal(ok.json.account, 'adam');
+  assert.ok(!ok.buf.toString().includes('good'));
+  const list = await call('GET', '/api/connections', { token: readToken });
+  assert.equal(list.json.connections[0].connected, true);
+  assert.ok(!list.buf.toString().includes('good'));
+  assert.equal((await call('POST', '/api/connections/github/device', { body: {} })).status, 400); // no client id configured
+  assert.equal((await call('DELETE', '/api/connections/github', { token: readToken })).status, 403);
+  assert.equal((await call('DELETE', '/api/connections/github')).json.removed, true);
+  assert.equal((await call('DELETE', '/api/connections/nope')).status, 404);
+  assert.equal((await call('GET', '/api/config', { token: readToken })).json.features.connections, true);
 });
 
 test('requests that came through a proxy or from another machine lose admin rights unless remoteAdmin is on', async () => {

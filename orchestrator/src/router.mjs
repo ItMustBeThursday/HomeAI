@@ -1,4 +1,5 @@
 // Explicit task-type → connector chain routing. Pure; no I/O.
+import { validateAuto } from './autoroute.mjs';
 
 const KINDS = new Set(['claude-cli', 'codex-cli', 'ollama']);
 
@@ -36,6 +37,7 @@ export function validateRoutes(config) {
     if (r.memory !== undefined && !(typeof r.memory === 'boolean' || (Array.isArray(r.memory) && r.memory.every((t) => typeof t === 'string' && t)))) throw new Error(`Route "${type}" memory must be a boolean or an array of tags`);
   }
   if (typeof config.default !== 'string' || !Object.hasOwn(routes, config.default)) throw new Error(`config.default must name an existing route`);
+  validateAuto(config.auto, routes, connectors);
   return config;
 }
 

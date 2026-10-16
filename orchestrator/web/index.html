@@ -205,6 +205,15 @@
         </div>
       </section>
 
+      <!-- CONNECTIONS -->
+      <section id="tab-connections" class="tab page">
+        <p class="muted">Log in to services once and the orchestrator keeps the login, so you and the models can use them without pasting tokens again. Logins are encrypted with Windows (DPAPI, this user account only) in <code>data/vault.json</code>, never sent to the browser again, never shown to models, and never published. Use a <b>fine-grained token</b> limited to the repos you want to share; creating issues or comments still asks for confirmation. Add other token-based services under <code>providers</code> in <code>config/connections.json</code>.</p>
+        <div id="conn-list"></div>
+        <details class="panel mt"><summary>How to get a GitHub token</summary>
+          <p class="muted">GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate. Pick the <code>ItMustBeThursday/HomeAI</code> repo with Contents, Issues, Pull requests and Actions access, as needed. For one-click "Sign in with GitHub", register an OAuth app with Device Flow enabled and put its client ID in <code>config/connections.json</code> under <code>github.clientId</code>.</p>
+        </details>
+      </section>
+
       <!-- DEVICES -->
       <section id="tab-devices" class="tab page">
         <p class="muted">The service always requires a token. This PC's WebUI picks up the admin token automatically. Other devices get a limited token: <b>read</b> dashboards, <b>chat</b> read + models (never shell or agents), <b>logan</b> the Logan feed only, <b>admin</b> everything. Tokens are shown once and stored only as hashes.</p>

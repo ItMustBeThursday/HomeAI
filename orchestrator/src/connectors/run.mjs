@@ -104,7 +104,7 @@ export function createRunner({
   // Streams so a request queued behind another model (single-GPU Ollama) fails over after
   // startTimeoutMs instead of blocking the whole chain; once tokens flow, timeoutMs applies.
   async function viaOllama(entry, prompt, system, { images = [], signal, emit }) {
-    const { url, body } = buildOllamaRequest({ model: entry.model, prompt, system, images });
+    const { url, body } = buildOllamaRequest({ model: entry.model, prompt, system, images, brief: !!entry.brief });
     const ctrl = new AbortController();
     let timer = setTimeout(() => ctrl.abort(new Error(`Ollama gave no output within ${startTimeoutMs} ms (model busy or loading)`)), startTimeoutMs);
     const onAbort = () => ctrl.abort(cancelled());

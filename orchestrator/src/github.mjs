@@ -9,7 +9,7 @@ export function parseCredential(output) {
   return m ? m[1].trim() : null;
 }
 
-export function createGithub({ repo, gitBin = 'git', spawnImpl = spawn, fetchImpl = fetch, now = Date.now, tokenTtlMs = 600_000 } = {}) {
+export function createGithub({ repo, gitBin = 'git', spawnImpl = spawn, fetchImpl = fetch, now = Date.now, tokenTtlMs = 600_000, tokenSource = null } = {}) {
   if (!/^[\w.-]+\/[\w.-]+$/.test(repo ?? '')) throw new Error('repo must look like owner/name');
   let cached = null;
 
@@ -41,7 +41,10 @@ export function createGithub({ repo, gitBin = 'git', spawnImpl = spawn, fetchImp
   }
 
   // Caches the promise, so parallel calls share one credential lookup.
-  function token() {
+  // A login saved in the vault (WebUI Connections tab) wins; Git Credential Manager is the fallback.
+  async function token() {
+    const saved = tokenSource ? await tokenSource() : null;
+    if (saved) return saved;
     if (!cached || now() - cached.at >= tokenTtlMs) cached = { value: fillToken(), at: now() };
     return cached.value;
   }
@@ -50,7 +53,7 @@ export function createGithub({ repo, gitBin = 'git', spawnImpl = spawn, fetchImp
     const headers = { accept: 'application/vnd.github+json', 'user-agent': 'homeai-orchestrator', 'x-github-api-version': '2022-11-28' };
     if (auth) {
       const t = await token();
-      if (!t) throw new Error('No GitHub login found in Git Credential Manager; sign in with git first');
+      if (!t) throw new Error('No GitHub login found; connect GitHub in the Connections tab (or sign in with git)');
       headers.authorization = `Bearer ${t}`;
     } else {
       const t = await token().catch(() => null);

@@ -75,3 +75,9 @@ test('parseOllamaResponse', () => {
   assert.equal(parseOllamaResponse({ message: { content: '' } }).inputTokens, 0);
   assert.throws(() => parseOllamaResponse({}), /content/);
 });
+
+test('ollama brief requests turn thinking off and cap the output', () => {
+  const { body } = buildOllamaRequest({ model: 'm', prompt: 'p', brief: true });
+  assert.deepEqual([body.think, body.options], [false, { temperature: 0, num_predict: 8 }]);
+  assert.equal(buildOllamaRequest({ model: 'm', prompt: 'p' }).body.think, undefined);
+});

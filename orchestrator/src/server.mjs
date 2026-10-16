@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import { join, normalize, extname, sep } from 'node:path';
 import { timingSafeEqual } from 'node:crypto';
 import { SCOPES } from './access.mjs';
+import { isAffirmation } from './autoroute.mjs';
 
 const MAX_BODY = 1_000_000;
 const MAX_BODY_IMAGES = 40_000_000; // chat/task bodies may carry base64 images
@@ -92,7 +93,7 @@ export function isRemote(req) {
 
 // saveConfig(kind, obj) persists an edit ('routes' | 'budgets'); status(config, opts) checks connector health.
 // auth: createAuth(...) from access.mjs (scoped tokens). token: legacy single bearer token (tests). Neither: open.
-export function createApp({ orchestrator, conversations, scheduler, saveConfig, status, auth, token, attachments, memory, shell, github, network = {}, webDir, version = '0.0.0', now = Date.now, tokenFile }) {
+export function createApp({ orchestrator, conversations, scheduler, saveConfig, status, auth, token, attachments, memory, shell, github, connections, network = {}, webDir, version = '0.0.0', now = Date.now, tokenFile }) {
   const identify = auth
     ? (h) => auth.identify(h)
     : token
@@ -153,8 +154,8 @@ export function createApp({ orchestrator, conversations, scheduler, saveConfig, 
 
   // ---- read ----
   add('GET', '/api/config', 'read', () => {
-    const { connectors, routes: r, default: def } = orchestrator.config;
-    return { connectors, routes: r, default: def, caps: orchestrator.caps, editable: !!saveConfig, features: { shell: !!shell, memory: !!memory, github: !!github, images: !!attachments, devices: !!auth, scheduler: !!scheduler } };
+    const { connectors, routes: r, default: def, auto } = orchestrator.config;
+    return { connectors, routes: r, default: def, auto, caps: orchestrator.caps, editable: !!saveConfig, features: { shell: !!shell, memory: !!memory, github: !!github, images: !!attachments, devices: !!auth, connections: !!connections, scheduler: !!scheduler } };
   });
   add('GET', '/api/usage', 'read', (c) => {
     const hours = Number(c.url.searchParams.get('hours') ?? 24);
@@ -176,6 +177,7 @@ export function createApp({ orchestrator, conversations, scheduler, saveConfig, 
     const q = c.url.searchParams.get('q');
     return { notes: q ? m.search(q, 20) : m.list() };
   });
+  add('GET', '/api/connections', 'read', () => ({ connections: need(connections, 'Connections').list() }));
   add('GET', '/api/github', 'read', (c) => userCall(() => need(github, 'GitHub').summary()));
   add('GET', '/api/github/issues', 'read', (c) => userCall(async () => ({ issues: await need(github, 'GitHub').issues(c.url.searchParams.get('state') ?? 'open') })));
   add('GET', '/api/github/runs', 'read', (c) => userCall(async () => ({ runs: await need(github, 'GitHub').runs() })));
@@ -190,13 +192,38 @@ export function createApp({ orchestrator, conversations, scheduler, saveConfig, 
     const body = await readJson(c.req, MAX_BODY_IMAGES);
     const conv = body.conversationId && conversations ? conversations.get(body.conversationId) : null;
     // Approving a plan runs it on the planning route's `then` route, in the folder that was planned.
-    const approval = body.approve ? orchestrator.approvalFor(body.conversationId) : null;
+    let approval = body.approve ? orchestrator.approvalFor(body.conversationId) : null;
     if (body.approve && !approval) throw new HttpError(400, 'There is no plan waiting for approval in this conversation');
     if (approval && body.images !== undefined) throw new HttpError(400, 'Images cannot be attached to a plan approval');
-    const { images, cwd, project } = await userCall(() => approval
+    // Auto chats: a cheap check on every message picks the route. "Yes, go ahead" under a pending plan approves it.
+    const isAuto = !body.approve && !!orchestrator.config.auto && (body.taskType === 'auto' || (!body.taskType && conv?.taskType === 'auto'));
+    const canAct = c.identity.scopes.has('admin') && !!shell;
+    let pendingAuto = null;
+    if (isAuto) {
+      const pending = orchestrator.approvalFor(body.conversationId);
+      if (pending && canAct && body.images === undefined && isAffirmation(body.prompt)) {
+        approval = pending;
+        pendingAuto = { kind: 'approve', route: pending.route, via: 'rule', reason: 'go-ahead on a pending plan', ms: 0 };
+      }
+    }
+    // Without a per-message check the route is known now, so permission and project errors return as HTTP errors.
+    const early = isAuto && !pendingAuto ? null : await userCall(() => approval
       ? prepare(c, { project: approval.project }, approval.route, conv?.project)
       : prepare(c, body, body.taskType || conv?.taskType, conv?.project));
-    return maybeStream(c, body, (extra) => userCall(() => orchestrator.chat({ conversationId: body.conversationId, prompt: body.prompt, taskType: body.taskType, connector: body.connector, images, cwd, project, approve: !!approval, ...extra })));
+    return maybeStream(c, body, (extra) => userCall(async () => {
+      let auto = pendingAuto;
+      if (isAuto && !auto) {
+        extra.onEvent?.({ type: 'routing' });
+        auto = await orchestrator.autoRoute({ conversationId: body.conversationId, prompt: body.prompt, hasImages: Array.isArray(body.images) && body.images.length > 0, canAct, signal: extra.signal });
+      }
+      if (auto) extra.onEvent?.({ type: 'routed', ...auto });
+      const { images, cwd, project } = early ?? prepare(c, body, auto.route, conv?.project);
+      const reply = await orchestrator.chat({
+        conversationId: body.conversationId, prompt: approval && pendingAuto ? undefined : body.prompt, taskType: auto ? undefined : body.taskType, connector: body.connector,
+        images, cwd, project, approve: !!approval, auto: approval ? undefined : auto ?? undefined, ...extra,
+      });
+      return pendingAuto ? { ...reply, reply: { ...reply.reply, auto: { via: pendingAuto.via, reason: pendingAuto.reason, ms: 0 } } } : reply;
+    }));
   });
   add('PATCH', '/api/conversations/:id', 'chat', async (c) => {
     const body = await readJson(c.req);
@@ -256,6 +283,14 @@ export function createApp({ orchestrator, conversations, scheduler, saveConfig, 
     const body = await readJson(c.req);
     return userCall(() => need(github, 'GitHub').comment(body.number, body.body));
   });
+
+  add('POST', '/api/connections/github/device', 'admin', (c) => userCall(() => need(connections, 'Connections').deviceStart()));
+  add('POST', '/api/connections/github/device/poll', 'admin', (c) => userCall(() => need(connections, 'Connections').devicePoll()));
+  add('POST', '/api/connections/:id', 'admin', async (c) => {
+    const body = await readJson(c.req);
+    return userCall(() => need(connections, 'Connections').connect(c.params.id, body.secret));
+  });
+  add('DELETE', '/api/connections/:id', 'admin', (c) => userCall(() => need(connections, 'Connections').disconnect(c.params.id)));
 
   add('GET', '/api/devices', 'admin', () => ({ devices: need(auth, 'Device tokens').listDevices(), scopes: SCOPES }));
   add('POST', '/api/devices', 'admin', async (c) => {

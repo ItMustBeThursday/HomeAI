@@ -19,5 +19,6 @@
     "plan": { "chain": ["claude-sonnet", "codex"], "agent": true, "readOnly": true, "then": "agent", "maxTurns": 25, "tools": ["Read", "Glob", "Grep"], "memory": true },
     "agent": { "chain": ["claude-sonnet", "codex"], "agent": true, "maxTurns": 40, "tools": ["Bash", "Read", "Edit", "Write", "Glob", "Grep", "WebFetch", "WebSearch"], "memory": true }
   },
+  "auto": { "chat": "general", "act": "agent", "plan": "plan", "check": ["local-main", "local-fast", "local-vision", "local-coder"], "fallback": "act", "timeoutMs": 8000, "coldTimeoutMs": 30000 },
   "default": "general"
 }

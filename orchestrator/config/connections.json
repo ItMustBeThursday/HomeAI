@@ -1,0 +1,7 @@
+{
+  "github": {
+    "clientId": "",
+    "scope": "repo workflow read:user"
+  },
+  "providers": {}
+}

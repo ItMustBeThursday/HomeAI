@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { validateRoutes, resolveChain } from './router.mjs';
 import { makeEntry, summarize, checkBudget, capStatus, validateCaps } from './ledger.mjs';
 import { buildPrompt } from './history.mjs';
+import { createAutoRouter } from './autoroute.mjs';
 
 const CHAT_SYSTEM = 'You are HomeAI, a helpful assistant for a family home. Answer clearly and concisely.';
 const AGENT_SYSTEM = [
@@ -19,7 +20,8 @@ const PLAN_SYSTEM = [
 ].join(' ');
 const APPROVED = 'The user approved the plan below. Carry it out step by step. If what you find differs from what the plan expected, stop and report instead of improvising. Finish with what you did, what you verified, and anything left undone.';
 
-export function createOrchestrator({ config, caps = {}, store, history, conversations, memory, run, limiter, now = Date.now, newId = randomUUID }) {
+// loadedModels(): Set of model names Ollama has in memory (lets the auto-route check avoid swapping models).
+export function createOrchestrator({ config, caps = {}, store, history, conversations, memory, run, limiter, loadedModels, now = Date.now, newId = randomUUID }) {
   validateRoutes(config);
   validateCaps(caps, { connectors: Object.keys(config.connectors), taskTypes: Object.keys(config.routes) });
   if (typeof run !== 'function') throw new Error('run must be a function');
@@ -41,6 +43,17 @@ export function createOrchestrator({ config, caps = {}, store, history, conversa
   }
 
   const isAgentRoute = (taskType) => !!config.routes[routeFor(taskType, false)]?.agent;
+
+  // Auto chats: the cheap check picks the route for each message. The previous reply's route gives it context.
+  const decide = createAutoRouter({ getConfig: () => config, run, limiter, loaded: loadedModels, now });
+  async function autoRoute({ conversationId, prompt, hasImages = false, canAct = true, signal } = {}) {
+    const conv = conversationId && conversations ? conversations.get(conversationId) : null;
+    const last = conv?.messages.findLast((m) => m.role === 'assistant' && m.text);
+    const kindOf = (t) => (t === config.auto?.act ? 'act' : t === config.auto?.plan ? 'plan' : 'chat');
+    const d = await decide({ prompt, previous: last ? { text: last.text, kind: kindOf(last.taskType) } : null, hasImages, canAct, signal });
+    if (d.checked) record({ connector: d.checked, taskType: 'auto', inputTokens: d.inputTokens, outputTokens: d.outputTokens, costUsd: 0, ok: d.checkOk });
+    return { kind: d.kind, route: d.route, via: d.via, reason: d.reason, ms: d.ms };
+  }
 
   // The plan waiting for approval and the route that carries it out, or null. A plan is pending when it is the
   // last message, or only failed/stopped approval attempts follow it (so a failed run can be retried).
@@ -130,7 +143,8 @@ export function createOrchestrator({ config, caps = {}, store, history, conversa
   // Multi-turn chat: prior turns are folded into the prompt (the CLIs are stateless).
   // approve: carry out the plan that ends the conversation, on the planning route's `then` route (prompt optional;
   // it is added as extra instructions). The caller resolves cwd for that route (see approvalFor).
-  async function chat({ conversationId, prompt, taskType, connector, images = [], cwd, project, approve = false, signal, onEvent } = {}) {
+  // auto: the autoRoute decision for this message; the conversation stays an "auto" one and the reply records why.
+  async function chat({ conversationId, prompt, taskType, connector, images = [], cwd, project, approve = false, auto, signal, onEvent } = {}) {
     if (!conversations) throw new Error('Chat is not enabled');
     let conv;
     let type;
@@ -147,20 +161,21 @@ export function createOrchestrator({ config, caps = {}, store, history, conversa
       modelPrompt = buildPrompt(conv.messages.slice(0, -1), `${APPROVED}${note ? `\n\nExtra instructions from the user:\n${note}` : ''}\n\nApproved plan:\n${plan.text}`);
     } else {
       if (typeof prompt !== 'string' || !prompt.trim()) throw new Error('prompt must be a non-empty string');
-      conv = conversationId ? conversations.get(conversationId) : conversations.create({ title: prompt.trim().split('\n')[0], taskType, project });
+      conv = conversationId ? conversations.get(conversationId) : conversations.create({ title: prompt.trim().split('\n')[0], taskType: auto ? 'auto' : taskType, project });
       if (!conv) throw new Error('Conversation not found');
-      type = taskType || conv.taskType;
+      type = auto ? auto.route : taskType || conv.taskType;
       modelPrompt = buildPrompt(conv.messages, prompt);
     }
     const reply = await task({ taskType: type, prompt: modelPrompt, system: CHAT_SYSTEM, connector, source: 'chat', conversationId: conv.id, images, cwd, signal, onEvent });
     const refs = images.map(({ id, name, mediaType }) => ({ id, name, mediaType }));
     const userMsg = { role: 'user', text: prompt, ts: now(), ...(refs.length ? { images: refs } : {}), ...(approve ? { approved: true } : {}) };
     const where = cwd && project ? { project } : {};
+    const why = auto ? { auto: { via: auto.via, reason: auto.reason, ms: auto.ms } } : {};
     const botMsg = reply.ok
-      ? { role: 'assistant', text: reply.text, ts: now(), taskId: reply.id, connector: reply.connector, model: reply.model, taskType: reply.taskType, ms: reply.ms, ...where, ...(config.routes[reply.taskType]?.readOnly ? { plan: true } : {}) }
-      : { role: 'assistant', text: '', error: reply.error, ts: now(), taskId: reply.id, taskType: reply.taskType, ...where };
+      ? { role: 'assistant', text: reply.text, ts: now(), taskId: reply.id, connector: reply.connector, model: reply.model, taskType: reply.taskType, ms: reply.ms, ...where, ...why, ...(config.routes[reply.taskType]?.readOnly ? { plan: true } : {}) }
+      : { role: 'assistant', text: '', error: reply.error, ts: now(), taskId: reply.id, taskType: reply.taskType, ...where, ...why };
     const saved = conversations.append(conv.id, userMsg, botMsg);
-    return { conversation: { id: saved.id, title: saved.title, project: saved.project }, reply };
+    return { conversation: { id: saved.id, title: saved.title, project: saved.project }, reply: { ...reply, ...why, ...(botMsg.plan ? { plan: true } : {}) } };
   }
 
   return {
@@ -169,6 +184,7 @@ export function createOrchestrator({ config, caps = {}, store, history, conversa
     history,
     memory,
     isAgentRoute,
+    autoRoute,
     // For the server: which route and project an approval in this conversation would run on, or null.
     approvalFor: (conversationId) => {
       const plan = conversations && conversationId ? pendingPlan(conversations.get(conversationId)) : null;

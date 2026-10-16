@@ -7,3 +7,4 @@ node_modules/
 *.sqlite*
 .env*
 auth.json
+vault.json
