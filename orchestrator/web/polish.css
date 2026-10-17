@@ -114,3 +114,43 @@ table tr.row { display:table-row; }
   .studio-submit #media-status { flex-basis:100%; }
 }
 @media (prefers-reduced-motion:reduce) { *, *::before, *::after { animation:none !important; transition:none !important; scroll-behavior:auto !important; } }
+
+/* Chats that are working stay usable: the sidebar shows which ones are busy. */
+.conv .spin { width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--border-strong); border-top-color: var(--accent); animation: convspin .8s linear infinite; flex: none; }
+@keyframes convspin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .conv .spin { animation: none; border-top-color: var(--accent); } }
+
+.conv .unread-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex: none; }
+.conv.unread .t { color: var(--text); font-weight: 600; }
+.conv-panel { height: auto; max-height: min(46vh, 340px); }
+#job-text { width: 100%; box-sizing: border-box; min-height: 96px; }
+
+/* Admin panel */
+#tab-chat.active { flex-direction: column; }
+.chat-tabs { display: flex; flex: none; gap: 6px; overflow-x: auto; padding: 6px 12px; border-bottom: 1px solid var(--border); }
+.chat-tabs button { flex: none; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-tabs .selected { background: var(--accent); color: white; }
+.conv:focus-within .ca { opacity: 1; }
+.admin-dialog { max-width: 640px; width: calc(100% - 32px); max-height: 86vh; overflow: auto; }
+.adm-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.adm-head h3 { margin: 0; }
+.adm-sec { border-top: 1px solid var(--border); padding: 12px 0; display: grid; gap: 8px; }
+.adm-sec:first-child { border-top: 0; }
+.adm-sec h4 { margin: 0; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--faint); }
+.adm-kv { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.adm-kv > span:last-child { display: inline-flex; gap: 6px; align-items: center; text-align: right; }
+.adm-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.adm-list { display: grid; gap: 6px; }
+
+/* Private chat */
+.private-page.active { display: flex; flex-direction: column; gap: 12px; height: 100%; }
+.private-banner { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; border-left: 4px solid var(--accent, #6a5acd); }
+.private-page .thread-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.private-page .thread-scroll { flex: 1; overflow: auto; }
+.private-page .bad { color: var(--bad, #d9534f); }
+
+/* Persistent studio chat */
+.studio-thread { display:flex; flex-direction:column; gap:10px; max-height:420px; overflow:auto; margin-bottom:24px; padding:4px; }
+.studio-thread .m { display:flex; flex-direction:column; }
+.studio-thread .m .bubble { max-width:100%; }
+.studio-thread-empty { margin:8px 0; }

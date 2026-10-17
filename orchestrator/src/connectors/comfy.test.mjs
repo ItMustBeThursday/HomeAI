@@ -1,9 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, readdirSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, mkdirSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fillWorkflow, outputFiles, createComfyRunner } from './comfy.mjs';
+import { fillWorkflow, outputFiles, createComfyRunner, durationFromPrompt } from './comfy.mjs';
 import { createRunner } from './run.mjs';
 
 const tpl = JSON.stringify({
@@ -113,3 +113,52 @@ for (const mode of ['error', 'timeout', 'cancel']) {
     assert.ok(cleanup.every((c) => !c.signal.aborted));
   });
 }
+
+test('durationFromPrompt reads a length named in the prompt and clamps it', () => {
+  assert.equal(durationFromPrompt('Make a 15 second upbeat guitar song'), 15);
+  assert.equal(durationFromPrompt('a 2 minute ambient track'), 120);
+  assert.equal(durationFromPrompt('a 3-second sting'), 5);
+  assert.equal(durationFromPrompt('a 10 minute epic'), 120);
+  assert.equal(durationFromPrompt('upbeat acoustic guitar song'), null);
+  assert.equal(durationFromPrompt('120bpm funk at 3 am'), null);
+});
+
+test('comfy runner: private run writes to the private folder and scrubs ComfyUI output and history', async () => {
+  const out = mkdtempSync(join(tmpdir(), 'out-'));
+  const priv = mkdtempSync(join(tmpdir(), 'priv-'));
+  const src = mkdtempSync(join(tmpdir(), 'cuiout-'));
+  mkdirSync(join(src, 'video'));
+  writeFileSync(join(src, 'video', 'clip.mp4'), 'x');
+  const calls = [];
+  const fetchImpl = async (url, init = {}) => {
+    calls.push({ url, body: init.body ? JSON.parse(init.body) : null });
+    if (url.endsWith('/prompt')) return new Response(JSON.stringify({ prompt_id: 'abcdef12-3456' }), { status: 200 });
+    if (url.includes('/history/')) return new Response(JSON.stringify({ 'abcdef12-3456': { outputs: { 11: { videos: [{ filename: 'clip.mp4', subfolder: 'video', type: 'output' }] } }, status: { status_str: 'success' } } }), { status: 200 });
+    if (url.includes('/view?')) return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
+    return new Response('{}', { status: 200 });
+  };
+  const run = createComfyRunner({ baseUrl: 'http://x', workflowDir: wfDir, outDir: out, sourceOutputDir: src, fetchImpl, pollMs: 1, readFile, makeId: () => 'client', seed: () => 7 });
+  const r = await run({ workflow: 'demo.json' }, { prompt: 'cat', privateDir: priv });
+  assert.equal(r.ok, true);
+  assert.equal(readdirSync(priv).length, 1, 'file is in the private folder');
+  assert.equal(readdirSync(out).length, 0, 'nothing in the shared library');
+  assert.equal(existsSync(join(src, 'video', 'clip.mp4')), false, "ComfyUI's own copy is removed");
+  assert.ok(calls.some((c) => c.url.endsWith('/history') && c.body?.delete?.[0] === 'abcdef12-3456'), 'history entry deleted');
+});
+
+test('runner starts ComfyUI when it does not answer, then proceeds', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'comfy-start-'));
+  writeFileSync(join(dir, 'w.json'), JSON.stringify({ 1: { class_type: 'X', inputs: { text: '{{prompt}}' } } }));
+  let started = 0, up = false;
+  const fetchImpl = async (url) => {
+    if (url.endsWith('/system_stats')) return { ok: up };
+    if (url.endsWith('/prompt')) { if (!up) throw new Error('refused'); return { ok: true, json: async () => ({ prompt_id: 'abcdefgh1' }) }; }
+    if (url.includes('/history/')) return { json: async () => ({ abcdefgh1: { outputs: { 1: { images: [{ filename: 'a.png', subfolder: '', type: 'output' }] } } } }) };
+    if (url.includes('/view')) return { ok: true, arrayBuffer: async () => new ArrayBuffer(4) };
+    return { ok: true };
+  };
+  const run = createComfyRunner({ workflowDir: dir, outDir: join(dir, 'out'), fetchImpl, pollMs: 1, readFile, startServer: async () => { started++; up = true; } });
+  const out = await run({ workflow: 'w.json' }, { prompt: 'hi' });
+  assert.equal(out.ok, true);
+  assert.equal(started, 1);
+});

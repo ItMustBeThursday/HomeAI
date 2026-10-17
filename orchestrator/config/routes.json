@@ -2,44 +2,84 @@
   "connectors": {
     "local-fast": {
       "kind": "ollama",
-      "model": "homeai-fast:locked"
+      "model": "homeai-fast:locked",
+      "category": "Fast & everyday",
+      "label": "Gemma 4 E4B",
+      "note": "Quick replies, small footprint"
     },
     "local-main": {
       "kind": "ollama",
-      "model": "homeai-main:locked"
+      "model": "homeai-main:locked",
+      "category": "General & reasoning",
+      "label": "Qwen 3.8 27B",
+      "note": "Local shortlist. General chat, research and coding; ~18 GB Q4 weights. Text smoke passed at 4096 context; vision and quality unverified.",
+      "recommended": true,
+      "ctx": 4096,
+      "startTimeoutMs": 240000,
+      "vision": true
     },
     "local-coder": {
       "kind": "ollama",
-      "model": "homeai-coder:locked"
+      "model": "homeai-coder:locked",
+      "category": "Coding",
+      "label": "Qwen3-Coder 30B-A3B",
+      "note": "Everyday local coding"
     },
     "local-vision": {
       "kind": "ollama",
       "model": "homeai-vision:locked",
-      "vision": true
+      "vision": true,
+      "category": "Vision",
+      "label": "Qwen3-VL 4B",
+      "note": "Read images and screenshots"
     },
     "claude-haiku": {
       "kind": "claude-cli",
-      "model": "haiku"
+      "model": "haiku",
+      "category": "Cloud agents (Claude / Codex)",
+      "label": "Claude Haiku",
+      "note": "Fast cloud model"
     },
     "claude-sonnet": {
       "kind": "claude-cli",
-      "model": "sonnet"
+      "model": "sonnet",
+      "category": "Cloud agents (Claude / Codex)",
+      "label": "Claude Sonnet",
+      "note": "Balanced cloud model, agent work"
     },
     "claude-opus": {
       "kind": "claude-cli",
-      "model": "opus"
+      "model": "opus",
+      "category": "Cloud agents (Claude / Codex)",
+      "label": "Claude Opus",
+      "note": "Strongest cloud reasoning"
     },
     "codex": {
       "kind": "codex-cli",
-      "model": "gpt-6.1-sol"
+      "model": "gpt-6.1-sol",
+      "category": "Cloud agents (Claude / Codex)",
+      "label": "Codex",
+      "note": "Coding agent"
     },
     "local-deep": {
       "kind": "ollama",
-      "model": "homeai-deep:locked"
+      "model": "homeai-deep:locked",
+      "category": "Heavyweight / CPU offload",
+      "label": "Qwen3-Next 80B-A3B",
+      "note": "Local shortlist. Deep analysis and long-form text; ~50 GB Q4 weights. CPU offload required; Text smoke passed at 4096 context; quality unverified.",
+      "recommended": true,
+      "ctx": 4096,
+      "startTimeoutMs": 240000
     },
     "local-giant": {
       "kind": "ollama",
-      "model": "homeai-giant:locked"
+      "model": "homeai-giant:locked",
+      "category": "Heavyweight / CPU offload",
+      "label": "gpt-oss 120B",
+      "note": "Local shortlist. Reasoning specialist; ~65 GB MXFP4 weights. CPU offload required; Text smoke passed at 4096 context; quality unverified.",
+      "recommended": true,
+      "ctx": 4096,
+      "startTimeoutMs": 240000
     },
     "video-wan-fp8": {
       "kind": "comfyui",
@@ -53,7 +93,10 @@
         "steps": 20,
         "cfg": 5,
         "fps": 24
-      }
+      },
+      "category": "Video",
+      "label": "Wan 2.2 5B FP8",
+      "note": "Tested, accepted"
     },
     "video-wan-q4": {
       "kind": "comfyui",
@@ -67,7 +110,10 @@
         "steps": 20,
         "cfg": 5,
         "fps": 24
-      }
+      },
+      "category": "Video",
+      "label": "Wan 2.2 5B Q4",
+      "note": "Tested, smaller"
     },
     "video-wan-q8": {
       "kind": "comfyui",
@@ -81,7 +127,10 @@
         "steps": 20,
         "cfg": 5,
         "fps": 24
-      }
+      },
+      "category": "Video",
+      "label": "Wan 2.2 5B Q8",
+      "note": "Tested"
     },
     "video-hunyuan15-480p": {
       "kind": "comfyui",
@@ -95,7 +144,10 @@
         "steps": 20,
         "cfg": 1,
         "fps": 24
-      }
+      },
+      "category": "Video",
+      "label": "HunyuanVideo 1.5 480p",
+      "note": "Untested workflow"
     },
     "music-ace-step-15": {
       "kind": "comfyui",
@@ -106,7 +158,10 @@
         "seconds": 30,
         "steps": 8,
         "bpm": 110
-      }
+      },
+      "category": "Music",
+      "label": "ACE-Step 1.5 turbo",
+      "note": "Tested"
     },
     "image-sdxl-turbo": {
       "kind": "comfyui",
@@ -118,7 +173,38 @@
         "height": 512,
         "steps": 4,
         "cfg": 1
-      }
+      },
+      "category": "Image",
+      "label": "SDXL Turbo",
+      "note": "Fast local images"
+    },
+    "local-heretic-exp": {
+      "kind": "ollama",
+      "model": "qwen3-4b-instruct-2507-heretic-exp:latest",
+      "category": "Fast & everyday",
+      "label": "Qwen3 4B Heretic (experimental)",
+      "note": "Experimental small model"
+    },
+    "local-coder-next": {
+      "kind": "ollama",
+      "model": "homeai-coder-next:locked",
+      "category": "Coding",
+      "label": "Qwen3-Coder-Next 80B Q4",
+      "note": "Local shortlist. Coding specialist; ~52 GB weights. CPU offload required; Text smoke passed at 4096 context; quality unverified. Text route, no shell tools.",
+      "ctx": 4096,
+      "startTimeoutMs": 240000,
+      "recommended": true
+    },
+    "local-moe-fast": {
+      "kind": "ollama",
+      "model": "homeai-moe-fast:locked",
+      "vision": true,
+      "category": "General & reasoning",
+      "label": "Qwen 3.5 35B-A3B Q4",
+      "note": "Local shortlist. General chat + vision; ~22 GB weights, exceeds actual 20 GB VRAM. CPU offload required; Text smoke passed at 4096 context; vision and quality unverified.",
+      "ctx": 4096,
+      "startTimeoutMs": 240000,
+      "recommended": true
     }
   },
   "routes": {
@@ -230,6 +316,29 @@
       "chain": [
         "image-sdxl-turbo"
       ]
+    },
+    "flagship": {
+      "chain": [
+        "local-giant",
+        "local-deep",
+        "local-main"
+      ],
+      "memory": true
+    },
+    "coding-local": {
+      "chain": [
+        "local-coder-next",
+        "local-coder"
+      ],
+      "memory": true
+    },
+    "general-local": {
+      "chain": [
+        "local-moe-fast",
+        "local-main",
+        "local-fast"
+      ],
+      "memory": true
     }
   },
   "auto": {

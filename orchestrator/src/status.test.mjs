@@ -40,6 +40,14 @@ test('reports per-connector health', async () => {
   assert.equal(r.connectors.x.ok, true);
 });
 
+test('unknown connector kind does not hide healthy connector results', async () => {
+  const s = createStatusChecker({ fetchImpl: fetchOk });
+  const r = await s({ connectors: { local: config.connectors.fast, unknown: { kind: 'unknown' } } });
+  assert.equal(r.connectors.local.ok, true);
+  assert.equal(r.connectors.unknown.ok, false);
+  assert.match(r.connectors.unknown.detail, /Unknown connector kind/);
+});
+
 test('unreachable Ollama, failing CLI and missing codex script', async () => {
   const s = createStatusChecker({ fetchImpl: async () => { throw new Error('ECONNREFUSED'); }, spawnImpl: fakeSpawn(1, 'nope'), codexScript: 'missing.js', exists: () => false });
   const r = await s(config);
@@ -61,4 +69,29 @@ test('caches until ttl unless fresh', async () => {
   t = 500;
   await s(config);
   assert.equal(calls, 6);
+});
+
+test('concurrent cache misses and fresh requests share backend probes', async () => {
+  let calls = 0;
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  const s = createStatusChecker({ fetchImpl: async u => { calls++; await gate; return fetchOk(u); }, spawnImpl: fakeSpawn(0, 'v'), exists: () => true, codexScript: 'c' });
+  const requests = Array.from({ length: 20 }, (_, i) => s(config, { fresh: i % 2 === 0 }));
+  assert.equal(calls, 2);
+  release();
+  const results = await Promise.all(requests);
+  assert.ok(results.every(r => r === results[0]));
+  await s(config);
+  assert.equal(calls, 2);
+});
+
+test('overlapping configurations cannot overwrite each other\'s cache', async () => {
+  const other = { ...config, connectors: { local: config.connectors.fast } };
+  let calls = 0;
+  const s = createStatusChecker({ fetchImpl: async u => { calls++; return fetchOk(u); }, spawnImpl: fakeSpawn(0, 'v'), exists: () => true, codexScript: 'c' });
+  const [a, b] = await Promise.all([s(config), s(other)]);
+  assert.equal(calls, 4);
+  assert.equal(await s(config), a);
+  assert.equal(await s(other), b);
+  assert.equal(calls, 4);
 });

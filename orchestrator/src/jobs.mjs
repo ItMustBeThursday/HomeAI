@@ -76,7 +76,8 @@ export function createJobs({ file, run, vetFolder = (p) => p, grantAlways, concu
   };
 
   function prune() {
-    const done = [...jobs.values()].filter((j) => FINISHED.has(j.status)).sort((a, b) => a.finishedAt - b.finishedAt);
+    // Jobs waiting on the owner (needs-input / needs-access) are never pruned.
+    const done = [...jobs.values()].filter((j) => FINISHED.has(j.status) && !j.status.startsWith('needs-')).sort((a, b) => a.finishedAt - b.finishedAt);
     for (const j of done.slice(0, Math.max(0, done.length - keepFinished))) jobs.delete(j.id);
   }
 

@@ -20,6 +20,19 @@ test('validateRoutes returns a valid config', () => {
   assert.equal(validateRoutes(c), c);
 });
 
+test('Ollama cold-load overrides are bounded and passed to routes', () => {
+  const c = config();
+  c.connectors.fast.startTimeoutMs = 240000;
+  assert.equal(resolveChain(validateRoutes(c), 'quick')[0].startTimeoutMs, 240000);
+  for (const value of [0, -1, 300001, '240000']) {
+    c.connectors.fast.startTimeoutMs = value;
+    assert.throws(() => validateRoutes(c), /startTimeoutMs/);
+  }
+  delete c.connectors.fast.startTimeoutMs;
+  c.connectors.claude.startTimeoutMs = 240000;
+  assert.throws(() => validateRoutes(c), /startTimeoutMs/);
+});
+
 test('validateRoutes rejects bad shapes', () => {
   const cases = [
     [null, /object/],

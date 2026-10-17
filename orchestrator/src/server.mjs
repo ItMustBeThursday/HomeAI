@@ -111,7 +111,7 @@ export function isRemote(req) {
 
 // saveConfig(kind, obj) persists an edit ('routes' | 'budgets'); status(config, opts) checks connector health.
 // auth: createAuth(...) from access.mjs (scoped tokens). token: legacy single bearer token (tests). Neither: open.
-export function createApp({ orchestrator, conversations, scheduler, jobs, grants, saveConfig, status, auth, token, attachments, memory, shell, terminals, github, connections, network = {}, webDir, mediaDir, version = '0.0.0', now = Date.now, tokenFile }) {
+export function createApp({ orchestrator, conversations, scheduler, jobs, grants, saveConfig, status, auth, token, attachments, memory, privateSessions, shell, terminals, github, connections, network = {}, webDir, mediaDir, version = '0.0.0', now = Date.now, tokenFile }) {
   const identify = auth
     ? (h) => auth.identify(h)
     : token
@@ -180,7 +180,7 @@ export function createApp({ orchestrator, conversations, scheduler, jobs, grants
   // ---- read ----
   add('GET', '/api/config', 'read', () => {
     const { connectors, routes: r, default: def, auto } = orchestrator.config;
-    return { connectors, routes: r, default: def, auto, caps: orchestrator.caps, editable: !!saveConfig, features: { usageReset: true, shell: !!shell, terminals: !!terminals, memory: !!memory, github: !!github, images: !!attachments, devices: !!auth, connections: !!connections, scheduler: !!scheduler, jobs: !!jobs, access: !!grants } };
+    return { connectors, routes: r, default: def, auto, caps: orchestrator.caps, editable: !!saveConfig, features: { usageReset: true, private: !!privateSessions, shell: !!shell, terminals: !!terminals, memory: !!memory, github: !!github, images: !!attachments, devices: !!auth, connections: !!connections, scheduler: !!scheduler, jobs: !!jobs, access: !!grants } };
   });
   add('GET', '/api/usage', 'read', (c) => {
     const hours = Number(c.url.searchParams.get('hours') ?? 24);
@@ -206,6 +206,17 @@ export function createApp({ orchestrator, conversations, scheduler, jobs, grants
     const m = need(memory, 'Memory');
     const q = c.url.searchParams.get('q');
     return { notes: q ? m.search(q, 20) : m.list() };
+  });
+  add('GET', '/api/memory/mcl', 'read', (c) => {
+    const m = need(memory, 'Memory');
+    return { ...m.exportMcl({ alias: c.url.searchParams.get('alias') !== '0' }) };
+  });
+  add('GET', '/api/memory/context', 'read', async (c) => {
+    const q = c.url.searchParams.get('q') ?? '';
+    const maxChars = Number(c.url.searchParams.get('maxChars') ?? 1800);
+    if (q.length > 4000 || !Number.isInteger(maxChars) || maxChars < 400 || maxChars > 12000) throw new HttpError(400, 'Query must be at most 4000 characters; maxChars must be an integer 400-12000');
+    const text = await need(memory, 'Memory').contextAsync(q, { format: 'mcl', maxChars, limit: 12 });
+    return { text, chars: text.length, maxChars, format: 'mcl', unverified: true };
   });
   add('GET', '/api/connections', 'read', () => ({ connections: need(connections, 'Connections').list() }));
   add('GET', '/api/github', 'read', (c) => userCall(() => need(github, 'GitHub').summary()));
@@ -291,7 +302,9 @@ export function createApp({ orchestrator, conversations, scheduler, jobs, grants
       }
     }
     // Without a per-message check the route is known now, so permission and project errors return as HTTP errors.
-    const media = !approval && mediaIntent(body.prompt, orchestrator.config);
+    const cfg = orchestrator.config;
+    const explicitMedia = !isAuto && !!body.connector && !!body.taskType && cfg.connectors[body.connector]?.kind === 'comfyui' && cfg.routes[body.taskType]?.chain.includes(body.connector);
+    const media = !approval && !explicitMedia && mediaIntent(body.prompt, cfg);
     const params = body.params === undefined ? undefined : await userCall(() => checkMediaParams(body.params));
     const early = isAuto && !pendingAuto ? null : await userCall(() => approval
       ? prepare(c, { project: approval.project }, approval.route, conv?.project)
@@ -311,6 +324,59 @@ export function createApp({ orchestrator, conversations, scheduler, jobs, grants
       return pendingAuto ? { ...reply, reply: { ...reply.reply, auto: { via: pendingAuto.via, reason: pendingAuto.reason, ms: 0 } } } : reply;
     }), { detach: true });
   });
+  // ---- private chat: in-memory transcript + scratch folder, local models only, wiped on close (see private.mjs) ----
+  const priv = (c) => {
+    const s = need(privateSessions, 'Private chat').get(c.params.id);
+    if (!s) throw new HttpError(404, 'This private chat is closed');
+    return s;
+  };
+  add('POST', '/api/private', 'chat', () => {
+    const s = need(privateSessions, 'Private chat').create();
+    return { id: s.id, idleMinutes: Math.round(privateSessions.ttlMs / 60_000) };
+  });
+  add('POST', '/api/private/:id/chat', 'chat', async (c) => {
+    const s = priv(c);
+    const body = await readJson(c.req, MAX_BODY_IMAGES);
+    if (s.abort) throw new HttpError(409, 'This private chat is still answering');
+    const params = body.params === undefined ? undefined : await userCall(() => checkMediaParams(body.params));
+    const images = body.images === undefined ? [] : await userCall(() => s.images().saveAll(body.images));
+    return maybeStream(c, body, (extra) => userCall(async () => {
+      // One request at a time per session; Stop (or closing the chat) aborts it.
+      const ctrl = new AbortController();
+      s.abort = ctrl;
+      const onAbort = () => ctrl.abort();
+      extra.signal?.addEventListener('abort', onAbort, { once: true });
+      try {
+        const out = await orchestrator.privateChat(s, { prompt: body.prompt, taskType: body.taskType, connector: body.connector, params, images, signal: ctrl.signal, onEvent: extra.onEvent });
+        return out;
+      } finally {
+        extra.signal?.removeEventListener('abort', onAbort);
+        s.abort = null;
+      }
+    }), { detach: false });
+  });
+  add('GET', '/api/private/:id/media/:name', 'chat', (c) => {
+    const s = priv(c);
+    const name = c.params.name;
+    const type = MEDIA_TYPES[(name.split('.').pop() ?? '').toLowerCase()];
+    if (!MEDIA_FILE.test(name) || baseName(name) !== name || !type) throw new HttpError(404, 'Media file not found');
+    let body;
+    try { body = readFileSync(join(s.mediaDir, name)); } catch { throw new HttpError(404, 'Media file not found'); }
+    c.res.writeHead(200, { 'content-type': type, 'content-length': body.length, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
+    c.res.end(body);
+    c.streamed = true;
+  });
+  add('GET', '/api/private/:id/attachments/:att', 'chat', async (c) => {
+    const s = priv(c);
+    const f = await userCall(() => s.images().file(c.params.att));
+    if (!f) throw new HttpError(404, 'Attachment not found');
+    c.res.writeHead(200, { 'content-type': f.mediaType, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
+    c.res.end(readFileSync(f.path));
+    c.streamed = true;
+  });
+  const closePrivate = (c) => ({ ok: true, closed: need(privateSessions, 'Private chat').close(c.params.id) });
+  add('DELETE', '/api/private/:id', 'chat', closePrivate);
+  add('POST', '/api/private/:id/close', 'chat', closePrivate);
   add('PATCH', '/api/conversations/:id', 'chat', async (c) => {
     const body = await readJson(c.req);
     if (typeof body.title !== 'string' || !body.title.trim()) throw new HttpError(400, 'title must be a non-empty string');
@@ -375,6 +441,11 @@ export function createApp({ orchestrator, conversations, scheduler, jobs, grants
   });
 
   add('POST', '/api/memory', 'admin', async (c) => userCall(async () => need(memory, 'Memory').add(await readJson(c.req))));
+  add('POST', '/api/memory/mcl', 'admin', async (c) => userCall(async () => {
+    const body = await readJson(c.req);
+    if (typeof body?.text !== 'string') throw new Error('text (MCL) is required');
+    return need(memory, 'Memory').importMcl(body.text);
+  }));
   add('PATCH', '/api/memory/:id', 'admin', async (c) => userCall(async () => need(memory, 'Memory').update(c.params.id, await readJson(c.req))));
   add('DELETE', '/api/memory/:id', 'admin', (c) => userCall(() => (need(memory, 'Memory').remove(c.params.id), { ok: true, trashed: c.params.id })));
 

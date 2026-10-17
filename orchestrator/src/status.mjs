@@ -20,7 +20,7 @@ async function version(spawnImpl, cmd, args) {
 }
 
 export function createStatusChecker({ ollamaBase = 'http://127.0.0.1:11435', comfyBase = 'http://127.0.0.1:8188', claudeBin = 'claude', codexScript, nodeBin = process.execPath, fetchImpl = fetch, spawnImpl = spawn, exists = existsSync, ttlMs = 30_000, now = Date.now }) {
-  let cached = null;
+  const checks = new WeakMap();
 
   async function check(config) {
     const kinds = new Set(Object.values(config.connectors).map((c) => c.kind));
@@ -59,21 +59,27 @@ export function createStatusChecker({ ollamaBase = 'http://127.0.0.1:11435', com
 
     const connectors = {};
     for (const [name, c] of Object.entries(config.connectors)) {
-      const b = backends[c.kind];
+      const b = backends[c.kind] ?? { ok: false, detail: `Unknown connector kind: ${c.kind}` };
+      const meta = { category: c.category, label: c.label, note: c.note };
       if (c.kind === 'ollama') {
         const installed = b.installed.includes(c.model);
-        connectors[name] = { kind: c.kind, model: c.model, ok: b.ok && installed, loaded: b.loaded.includes(c.model), detail: !b.ok ? 'Ollama unreachable' : installed ? null : 'model not installed' };
+        connectors[name] = { ...meta, kind: c.kind, model: c.model, ok: b.ok && installed, loaded: b.loaded.includes(c.model), detail: !b.ok ? 'Ollama unreachable' : installed ? null : 'model not installed' };
       } else {
-        connectors[name] = { kind: c.kind, model: c.model, ok: b.ok, detail: b.ok ? null : b.detail };
+        connectors[name] = { ...meta, kind: c.kind, model: c.model, ok: b.ok, detail: b.ok ? null : b.detail };
       }
     }
     return { checkedAt: now(), backends, connectors };
   }
 
   return async function status(config, { fresh = false } = {}) {
-    if (!fresh && cached && now() - cached.checkedAt < ttlMs && cached.config === config) return cached.result;
-    const result = await check(config);
-    cached = { checkedAt: result.checkedAt, config, result };
-    return result;
+    let entry = checks.get(config);
+    if (!entry) { entry = {}; checks.set(config, entry); }
+    if (entry.pending) return entry.pending;
+    if (!fresh && entry.result && now() - entry.result.checkedAt < ttlMs) return entry.result;
+    entry.pending = check(config).then(result => {
+      entry.result = result;
+      return result;
+    }).finally(() => { entry.pending = null; });
+    return entry.pending;
   };
 }

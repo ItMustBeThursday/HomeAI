@@ -14,6 +14,8 @@ export function validateRoutes(config) {
     if (!KINDS.has(c.kind)) throw new Error(`Connector "${name}" has unknown kind "${c.kind}"`);
     if (typeof c.model !== 'string' || !c.model) throw new Error(`Connector "${name}" needs a model string`);
     if (c.vision !== undefined && typeof c.vision !== 'boolean') throw new Error(`Connector "${name}" vision must be a boolean`);
+    if (c.startTimeoutMs !== undefined && !(c.kind === 'ollama' && Number.isInteger(c.startTimeoutMs) && c.startTimeoutMs >= 1000 && c.startTimeoutMs <= 300000)) throw new Error(`Connector "${name}" startTimeoutMs must be 1000-300000 for Ollama`);
+    for (const f of ['category', 'label', 'note']) if (c[f] !== undefined && (typeof c[f] !== 'string' || !c[f].trim())) throw new Error(`Connector "${name}" ${f} must be a non-empty string`);
   }
   if (!isObj(routes) || Object.keys(routes).length === 0) throw new Error('config.routes must be a non-empty object');
   for (const [type, r] of Object.entries(routes)) {
@@ -53,6 +55,8 @@ export function resolveChain(config, taskType) {
     return {
       connector: name, kind: c.kind, model: c.model, maxTurns: route.maxTurns ?? 1, tools: [...(route.tools ?? [])],
       ...comfyFields(c),
+      ...(Number.isInteger(c.ctx) ? { ctx: c.ctx } : {}),
+      ...(Number.isInteger(c.startTimeoutMs) ? { startTimeoutMs: c.startTimeoutMs } : {}),
       ...(c.vision ? { vision: true } : {}),
       ...(route.agent ? { agent: true } : {}),
       ...(route.readOnly ? { readOnly: true } : {}),

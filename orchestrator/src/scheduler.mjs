@@ -1,4 +1,4 @@
-// In-service scheduler: runs configured commands on a timer. Replaces OpenClaw automations for plain scripts.
+// In-service scheduler: runs configured commands on a timer (replaced the old gateway automations).
 // Off unless config.enabled is true. Commands are argv arrays (no shell); a missed daily run catches up once.
 import { spawn } from 'node:child_process';
 import { collect } from './connectors/run.mjs';
@@ -63,7 +63,7 @@ export function createScheduler({ config, cwd, record, runPrompt, lastRuns = {},
         entry = { job: job.name, ts, ok: !!r.ok, code: r.ok ? 0 : 1, output: clip(String(r.ok ? r.text ?? '' : r.error ?? 'failed')) };
       } else {
         const [cmd, ...args] = job.command;
-        const { code, stdout, stderr } = await collect(spawnImpl, cmd, args, { timeoutMs, cwd });
+        const { code, stdout, stderr } = await collect(spawnImpl, cmd, args, { timeoutMs, cwd, maxChars: 20_000 });
         entry = { job: job.name, ts, ok: code === 0, code, output: clip(code === 0 ? stdout : stderr || stdout) };
       }
     } catch (err) {

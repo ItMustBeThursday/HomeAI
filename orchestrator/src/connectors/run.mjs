@@ -1,6 +1,7 @@
 // Executes one chain entry: spawns claude/codex or calls Ollama. Prompts go over stdin, never argv.
 import { spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
+import { effectiveCtx } from '../budget.mjs';
 import {
   buildClaudeArgs, buildClaudeStreamInput, createClaudeStreamParser, parseClaudeJson,
   buildCodexArgs, parseCodexJsonl, codexEvents, buildOllamaRequest, parseOllamaResponse,
@@ -23,12 +24,14 @@ export function killTree(child) {
 }
 
 // onLine(line) sees each complete stdout line as it arrives; signal aborts (and kills) the child.
-export function collect(spawnImpl, cmd, args, { input = '', timeoutMs, cwd, env, onLine, signal }) {
+export function collect(spawnImpl, cmd, args, { input = '', timeoutMs, cwd, env, onLine, signal, maxChars = 0 }) {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) return reject(cancelled());
     const child = spawnImpl(cmd, args, { cwd, env, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
+    // Optional cap: keep only the tail so a noisy command cannot exhaust memory.
+    const grow = (cur, d) => (maxChars && cur.length + d.length > maxChars ? (cur + d).slice(-maxChars) : cur + d);
     let pending = '';
     let timedOut = false;
     let aborted = false;
@@ -46,14 +49,14 @@ export function collect(spawnImpl, cmd, args, { input = '', timeoutMs, cwd, env,
       signal?.removeEventListener('abort', onAbort);
     };
     child.stdout.setEncoding('utf8').on('data', (d) => {
-      stdout += d;
+      stdout = grow(stdout, d);
       if (!onLine) return;
       pending += d;
       const lines = pending.split('\n');
       pending = lines.pop();
       for (const l of lines) onLine(l.replace(/\r$/, ''));
     });
-    child.stderr.setEncoding('utf8').on('data', (d) => (stderr += d));
+    child.stderr.setEncoding('utf8').on('data', (d) => (stderr = grow(stderr, d)));
     child.on('error', (err) => {
       done();
       reject(new Error(`Failed to start ${cmd}: ${err.message}`));
@@ -105,9 +108,10 @@ export function createRunner({
   // Streams so a request queued behind another model (single-GPU Ollama) fails over after
   // startTimeoutMs instead of blocking the whole chain; once tokens flow, timeoutMs applies.
   async function viaOllama(entry, prompt, system, { images = [], signal, emit }) {
-    const { url, body } = buildOllamaRequest({ model: entry.model, prompt, system, images, brief: !!entry.brief });
+    const { url, body } = buildOllamaRequest({ model: entry.model, prompt, system, images, brief: !!entry.brief, ctx: effectiveCtx(entry) });
     const ctrl = new AbortController();
-    let timer = setTimeout(() => ctrl.abort(new Error(`Ollama gave no output within ${startTimeoutMs} ms (model busy or loading)`)), startTimeoutMs);
+    const loadingMs = entry.startTimeoutMs ?? startTimeoutMs;
+    let timer = setTimeout(() => ctrl.abort(new Error(`Ollama gave no output within ${loadingMs} ms (model busy or loading)`)), loadingMs);
     const onAbort = () => ctrl.abort(cancelled());
     if (signal?.aborted) onAbort();
     signal?.addEventListener('abort', onAbort, { once: true });
@@ -162,7 +166,7 @@ export function createRunner({
 
   // images: [{path, mediaType}] already stored on disk by the caller.
   // entry.agent: let the model use tools (shell, files) inside opts.cwd; otherwise it is a plain text call.
-  return async function run(entry, { prompt, system, images = [], cwd: workDir, addDirs = [], signal, onDelta, onEvent } = {}) {
+  return async function run(entry, { prompt, system, images = [], cwd: workDir, addDirs = [], signal, onDelta, onEvent, privateDir } = {}) {
     if (typeof prompt !== 'string' || !prompt) throw new Error('prompt must be a non-empty string');
     const emit = (ev) => {
       onEvent?.(ev);
@@ -218,7 +222,7 @@ export function createRunner({
       case 'comfyui': {
         if (!comfyRun) throw new Error('ComfyUI is not configured');
         if (agent) throw new Error('Media connectors cannot run agent routes');
-        return comfyRun(entry, { prompt, signal });
+        return comfyRun(entry, { prompt, signal, privateDir });
       }
       default:
         throw new Error(`Unknown connector kind "${entry.kind}"`);

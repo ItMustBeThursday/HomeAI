@@ -35,4 +35,4 @@ Never automatically replay tools, purchases, messages, or media generation.
 
 Do not call the entire continuity feature complete until all acceptance checks pass.
 Deploy only with D:/HomeAI/scripts/Restart-Orchestrator.ps1. Preserve existing active
-work before restarting. Never remove OpenClaw or publish as part of this work.
+work before restarting. Do not publish as part of this work.

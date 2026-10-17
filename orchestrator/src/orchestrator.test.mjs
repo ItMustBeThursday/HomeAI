@@ -13,6 +13,16 @@ const config = {
 };
 const ok = (text) => ({ ok: true, text, inputTokens: 10, outputTokens: 5, costUsd: 0 });
 
+test('pinned heavyweight retains its cold-load deadline', async () => {
+  const c = structuredClone(config);
+  c.connectors.a.startTimeoutMs = 240000;
+  let received;
+  const o = createOrchestrator({ config: c, run: async entry => { received = entry; return ok('hi'); } });
+  const r = await o.task({ taskType: 'quick', connector: 'a', prompt: 'hello' });
+  assert.equal(r.ok, true);
+  assert.equal(received.startTimeoutMs, 240000);
+});
+
 test('returns first successful connector and records usage', async () => {
   const calls = [];
   const o = createOrchestrator({ config, run: async (e, p) => (calls.push([e.connector, p]), ok('hi')) });

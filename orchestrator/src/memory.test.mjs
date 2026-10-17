@@ -65,3 +65,73 @@ test('context always includes core notes, adds relevant ones, respects tags and 
   assert.equal(m.context('x', { maxChars: 10 }), '');
   assert.equal(store().m.context('anything'), '');
 });
+
+test('mcl context shrinks long notes to fit more of them, keeps the queried fact, drops duplicates', async () => {
+  const m = createMemoryStore(mkdtempSync(join(tmpdir(), 'memfocus-')));
+  const names = ['alder','birch','cedar','dogwood','elm','fir','ginkgo','hazel'];
+  for (let i = 0; i < 8; i++) m.add({ title: `entry ${i} sprinkler`, text: `${(`Routine ${names[i]} notes about hedges and ${names[(i+3)%8]} paths ${i}. `).repeat(25)} sprinkler code ${i}00 noted for ${names[i]}. ${(`Closing ${names[(i+5)%8]} remarks ${i}. `).repeat(25)}`, tags: ['episode'], source: `turn:c${i}:0:0` });
+  m.add({ title: 'dup a', text: 'sprinkler schedule is monday and thursday at six', tags: [], source: 'x:1' });
+  m.add({ title: 'dup a', text: 'sprinkler schedule is monday and thursday at six', tags: [], source: 'x:2' });
+  const out = m.context('sprinkler schedule', { format: 'mcl', maxChars: 1800, limit: 20 });
+  assert.ok(out.length <= 1800);
+  assert.equal(out.match(/monday and thursday/g).length, 1);
+  assert.ok((out.match(/sprinkler code/g) ?? []).length >= 3, out);
+});
+
+test('retrieval preserves corrections, negation and short numeric differences', () => {
+  const { m } = store();
+  const prefix = 'Zephyr calibration configuration for the workshop sensor current approved operating value';
+  for (const [i, text] of [
+    `${prefix} is 0.937.`, `${prefix} is 0.941.`,
+    `${prefix} is not 0.941.`,
+  ].entries()) m.add({ title: 'Zephyr calibration', text, source: `test:${i}` });
+  const packet = m.context('zephyr calibration', { format: 'mcl', maxChars: 1800, limit: 6 });
+  assert.match(packet, /is 0\.937/);
+  assert.match(packet, /is 0\.941/);
+  assert.match(packet, /is not 0\.941/);
+});
+
+test('duplicate copies cannot consume all retrieval slots before a distinct fact', () => {
+  const { m } = store();
+  for (let i = 0; i < 12; i++) m.add({ title: 'Zephyr calibration', text: 'Zephyr calibration previous reading 0.937.', source: `test:${i}` });
+  m.add({ title: 'Zephyr', text: 'Zephyr current reading 0.941.', source: 'test:current' });
+  const packet = m.context('zephyr calibration', { format: 'mcl', maxChars: 1200, limit: 2 });
+  assert.equal((packet.match(/previous reading/g) ?? []).length, 1);
+  assert.match(packet, /current reading 0\.941/);
+});
+
+test('identical values with different fact names remain separate', () => {
+  const { m } = store();
+  m.add({ title: 'Workshop router address', text: '192.168.1.1' });
+  m.add({ title: 'Workshop printer address', text: '192.168.1.1' });
+  const packet = m.context('workshop address', { format: 'mcl', maxChars: 1200 });
+  assert.match(packet, /router address/);
+  assert.match(packet, /printer address/);
+});
+
+test('relevance selects excerpts but original turn order places corrections after obsolete statements', () => {
+  const { m } = store();
+  m.add({ title: 'Zephyr', text: 'Zephyr old value 0.937.', tags: ['episode'], source: 'turn:conv1:2:0' });
+  m.add({ title: 'Zephyr', text: 'Zephyr corrected calibration value 0.941.', tags: ['episode'], source: 'turn:conv1:10:0' });
+  const packet = m.context('zephyr corrected calibration', { format: 'mcl', maxChars: 1200 });
+  assert.ok(packet.indexOf('0.937') < packet.indexOf('0.941'), packet);
+  assert.match(packet, /turn:conv1:2:0/);
+  assert.match(packet, /turn:conv1:10:0/);
+});
+
+import { createMemoryStore as _cms } from './memory.mjs';
+import { rememberConversation as _rc } from './experience.mjs';
+import { mkdtempSync as _mk } from 'node:fs';
+import { tmpdir as _td } from 'node:os';
+import { join as _jn } from 'node:path';
+import _test from 'node:test';
+import _assert from 'node:assert/strict';
+_test('episode excerpts are labelled current or superseded for small models', () => {
+  const m = _cms(_mk(_jn(_td(), 'mem-cur-')));
+  _rc(m, { id: 'c1', title: 'Zephyr', messages: [
+    { role: 'user', text: 'Zephyr record, obsolete: constant is 0.937.' },
+    { role: 'user', text: 'Zephyr correction, current: constant is 0.941, not 0.937.' }] });
+  const out = m.context('Zephyr constant', { format: 'mcl', maxChars: 1200, limit: 10 });
+  _assert.match(out, /\[SUPERSEDED, do not use\][^\n]*0\.937/);
+  _assert.match(out, /\[CURRENT\][^\n]*0\.941/);
+});

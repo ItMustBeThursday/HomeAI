@@ -88,3 +88,20 @@ test('conversations: create, append, rename, list, archive', () => {
   assert.throws(() => s.get('../../etc'), /Invalid/);
   assert.throws(() => s.append('missing-id', {}), /not found/);
 });
+
+test('buildPrompt condenses older turns instead of dropping them, and carries far more turns per budget', () => {
+  const msgs = [];
+  for (let i = 1; i <= 40; i++) {
+    msgs.push({ role: 'user', text: `Request ${i}: please check file D:/proj/mod${i}.mjs and report.` });
+    msgs.push({ role: 'assistant', text: `Looked around a lot. ${'Filler sentence about nothing much. '.repeat(30)}Result ${i}: fixed bug in mod${i}.mjs, 5 tests passed.` });
+  }
+  const p = buildPrompt(msgs, 'what next?', 8000);
+  assert.ok(p.length <= 8000 + 400, `prompt ${p.length}`);
+  assert.match(p, /Original request: Request 1:/);
+  assert.match(p, /Earlier, condensed:/);
+  assert.match(p, /Result 40: fixed bug in mod40/); // newest verbatim
+  const condensedTurns = (p.match(/^[UA]: /gm) ?? []).length;
+  const verbatimTurns = (p.match(/^(User|Assistant): /gm) ?? []).length;
+  assert.ok(condensedTurns + verbatimTurns >= 3 * verbatimTurns, `condensed ${condensedTurns} verbatim ${verbatimTurns}`);
+  assert.match(p, /Result 3\d: fixed bug/); // older gists keep the outcome sentence
+});

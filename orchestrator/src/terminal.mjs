@@ -70,6 +70,7 @@ export function createTerminals({ spawnImpl = spawn, audit, now = Date.now, base
       const nl = s.pending.indexOf('\n', at);
       if (nl < 0) {
         s.pending = s.pending.slice(at); // wait for the rest of the line
+        if (s.pending.length > 4096) { out += s.pending; s.pending = ''; } // malformed marker: flush as output
         break;
       }
       const line = s.pending.slice(at + 1, nl).replace(/\r$/, '');

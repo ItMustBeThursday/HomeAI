@@ -2,7 +2,9 @@
 // Safety rule: model/user text is only ever inserted with textContent or createTextNode, never innerHTML.
 // (The only innerHTML use is the static icon table below.)
 import { setupMedia } from './media.js';
+import { setupPrivate } from './private.js';
 import { createMediaRenderer, localMediaName } from './media-view.js';
+import { groupByCategory, modelTitle, modelDescription } from './model-catalog.js';
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 const fmt = new Intl.NumberFormat();
@@ -47,6 +49,7 @@ const ICONS = {
   menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
   queue: '<path d="M4 6h16M4 12h16M4 18h10"/><path d="M18 15l3 3-3 3"/>',
   archive: '<rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8M10 12h4"/>',
+  lock: '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
   trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-12M9 7V4h6v3"/>',
 };
 function icon(name) {
@@ -297,9 +300,9 @@ const TABS = [
   { id: 'devices', label: 'Devices', icon: 'devices', group: 'Admin', feature: 'devices', admin: true },
   { id: 'logan', label: 'Logan', icon: 'tv', group: 'Admin' },
 ];
-const TITLES = { ...Object.fromEntries(TABS.map((t) => [t.id, t.label])), chats: 'All chats', settings: 'Settings' };
+const TITLES = { ...Object.fromEntries(TABS.map((t) => [t.id, t.label])), chats: 'All chats', settings: 'Settings', private: 'Private chat' };
 const SUBS = {
-  chat: 'Route-aware conversations', chats: 'Open, archive, delete and restore conversations', jobs: 'Queue work and walk away', overview: 'Everything at a glance', terminal: 'Interactive shells, any folder', projects: 'Tests, git and GitHub',
+  chat: 'Route-aware conversations', private: 'Nothing saved · local models only', chats: 'Open, archive, delete and restore conversations', jobs: 'Queue work and walk away', overview: 'Everything at a glance', terminal: 'Interactive shells, any folder', projects: 'Tests, git and GitHub',
   memory: 'Durable facts the models can see', usage: 'Informational tokens and calls', history: 'Every task and its fallbacks', status: 'Backend and model health',
   schedule: 'Timed jobs and the request queue', config: 'Routes, connectors and budgets', connections: 'Logins for GitHub and other services', devices: 'Tokens for phones and displays', logan: 'Menu catalog (coming)', settings: 'Appearance and shortcuts',
 };
@@ -333,7 +336,15 @@ function buildNav() {
 
 const loaders = {};
 loaders.media = setupMedia({ h, api, stream, mediaView });
+loaders.private = setupPrivate({ h, api, stream, markdown, bootstrapToken, getToken: () => token });
 let current = 'chat';
+let baseTitle = 'HomeAI';
+// Browser tab title shows background work and finished replies you have not opened yet.
+function paintTitle() {
+  const working = typeof runs === 'undefined' ? 0 : runs.size;
+  const unseen = typeof unread === 'undefined' ? 0 : unread.size;
+  document.title = `${unseen ? `(${unseen}) ` : ''}${working ? '⏳ ' : ''}${baseTitle}`;
+}
 function show(tab) {
   if (!TITLES[tab]) tab = 'chat';
   current = tab;
@@ -341,7 +352,8 @@ function show(tab) {
   for (const s of $$('.tab')) s.classList.toggle('active', s.id === `tab-${tab}`);
   $('#page-title').textContent = TITLES[tab];
   $('#page-sub').textContent = SUBS[tab] ?? '';
-  document.title = `${TITLES[tab]} · HomeAI`;
+  baseTitle = `${TITLES[tab]} · HomeAI`;
+  paintTitle();
   history.replaceState(null, '', `#${tab}`);
   $('#app').classList.remove('menu-open');
   $('#scrim').hidden = true;
@@ -349,7 +361,7 @@ function show(tab) {
 }
 document.addEventListener('click', (e) => {
   const b = e.target.closest('[data-tab],[data-go]');
-  if (b) show(b.dataset.tab || b.dataset.go);
+  if (b) { if (b.closest('#admin-dialog')) $('#admin-dialog').close(); show(b.dataset.tab || b.dataset.go); }
 });
 
 // ---- Health ----
@@ -386,7 +398,7 @@ async function loadConfig() {
   route.value = prevRoute && routeExists(prevRoute) ? prevRoute : startRoute();
   const pin = $('#pin');
   const prevPin = pin.value;
-  pin.replaceChildren(h('option', { value: '' }, 'Automatic'), ...Object.entries(config.connectors).map(([name, c]) => h('option', { value: name, title:c.model }, name)));
+  pin.replaceChildren(h('option', { value: '' }, 'Automatic'), ...groupByCategory(Object.entries(config.connectors)).map(([cat, items]) => h('optgroup', { label: cat }, ...items.map(([name, c]) => h('option', { value: name, title: modelTitle(c) }, `${c.recommended ? '★ ' : ''}${c.label ? `${c.label} (${name})` : name}`)))));
   pin.value = prevPin && config.connectors[prevPin] ? prevPin : '';
   syncModels();
   return config;
@@ -400,9 +412,12 @@ function syncModels() {
     option.disabled = !!c && (media ? c.kind!=='comfyui' || c.media!==media : c.kind==='comfyui' || (route?.agent && !['claude-cli','codex-cli'].includes(c.kind)));
     option.hidden=option.disabled;
   }
+  for (const g of $('#pin').querySelectorAll('optgroup')) g.hidden = [...g.children].every((o) => o.disabled);
   if ($('#pin').selectedOptions[0]?.disabled) $('#pin').value='';
   $('#pin').title='Preferred model. Compatible route models are tried if it is unavailable.';
+  $('#model-purpose').textContent = modelDescription(config.connectors[$('#pin').value]);
 }
+$('#pin').addEventListener('change', syncModels);
 
 function applyFeatures() {
   const f = config?.features ?? {};
@@ -420,12 +435,38 @@ function applyFeatures() {
   });
   const chip = $('#who');
   chip.hidden = !whoami;
-  if (whoami) chip.textContent = `${whoami.name} · ${whoami.scopes.includes('admin') ? 'admin' : whoami.scopes.join(', ')}`;
+  if (whoami) { const adm = whoami.scopes.includes('admin'); chip.textContent = adm ? 'Admin ▾' : `${whoami.name} · ${whoami.scopes.join(', ')} ▾`; chip.title = adm ? `Admin panel — signed in as ${whoami.name}` : 'Account and access'; chip.setAttribute('aria-haspopup', adm ? 'dialog' : 'menu'); }
 }
 
 // ---- Chat state ----
 let convId = null;
-let sending = false;
+// Every send is its own run, so other chats stay usable while one is working. A run is "viewing" when its chat is the one on screen.
+const runs = new Set();
+const unread = new Set(); // chats whose reply finished while another chat was open
+let reattachRunId = null; // run id of a chat that was already running when it was reopened (after refresh/restart)
+let chatNavigation = 0;
+let chatLoading = false;
+const openChats = new Set();
+const composerDrafts = new Map();
+const runHere = () => [...runs].find((r) => r.viewing) ?? null;
+const runFor = (id) => (id ? [...runs].find((r) => r.convId === id) ?? null : null);
+function syncComposer() {
+  const r = runHere();
+  $('#send').disabled = !!(r || reattachRunId || chatLoading);
+  $('#stop').hidden = !(r || reattachRunId);
+  $('#busy').textContent = chatLoading ? 'Opening chat…' : r ? secs(Date.now() - r.started) : reattachRunId ? 'Working in background…' : '';
+  renderChatTabs();
+  paintTitle();
+}
+function renderChatTabs() {
+  const strip = $('#chat-tabs');
+  const ids = [...new Set([...openChats, ...convs.filter(c => c.running).map(c => c.id), ...[...runs].map(r => r.convId).filter(Boolean)])];
+  strip.replaceChildren(...ids.map(id => {
+    const c = convs.find(c => c.id === id);
+    const busy = c?.running || runFor(id) || (id === convId && reattachRunId);
+    return h('button', { type: 'button', class: `ghost sm${id === convId ? ' selected' : ''}`, 'aria-pressed': String(id === convId), title: c?.title ?? 'Chat', onclick: () => { show('chat'); openConversation(id); } }, `${busy ? '⏳ ' : unread.has(id) ? '● ' : ''}${c?.title ?? 'Chat'}`);
+  }), h('button', { type: 'button', class: 'ghost sm', onclick: () => { show('chat'); openConversation(null); } }, '+ New chat'));
+}
 let convs = [];
 let msgs = []; // messages currently in the thread: { role, text, ... }
 let pins = new Set(JSON.parse(localStorage.getItem('homeai-pins') || '[]'));
@@ -543,9 +584,10 @@ function renderConversations() {
     if (!sections.has(g)) continue;
     el.append(h('div', { class: 'conv-group' }, g));
     for (const c of sections.get(g)) {
-      el.append(h('div', { class: `conv${c.id === convId ? ' active' : ''}`, role: 'listitem', tabindex: '0', title: `${c.title}\n${when(c.updated)} · ${c.count} messages`,
+      const busy = c.running || !!runFor(c.id);
+      el.append(h('div', { class: `conv${c.id === convId ? ' active' : ''}${busy ? ' busy' : ''}${unread.has(c.id) ? ' unread' : ''}`, role: 'listitem', tabindex: '0', title: `${c.title}\n${when(c.updated)} · ${c.count} messages`,
         onclick: () => { show('chat'); openConversation(c.id); }, onkeydown: (e) => e.key === 'Enter' && (show('chat'), openConversation(c.id)) },
-      pins.has(c.id) ? h('span', { class: 'pin' }, '●') : null, h('span', { class: 't' }, c.title),
+      pins.has(c.id) ? h('span', { class: 'pin' }, '●') : null, unread.has(c.id) && !busy ? h('span', { class: 'unread-dot', title: 'New reply', 'aria-label': 'New reply' }) : null, busy ? h('span', { class: 'spin', title: 'Working…', role: 'status', 'aria-label': 'Working' }) : null, h('span', { class: 't' }, c.title),
       h('span', { class: 'ca' },
         h('button', { type: 'button', title: 'Archive', 'aria-label': `Archive ${c.title}`, onclick: (e) => { e.stopPropagation(); archiveConv(c.id, c.title); } }, icon('archive')),
         h('button', { type: 'button', class: 'del', title: 'Delete (moves to trash, can be restored)', 'aria-label': `Delete ${c.title}`, onclick: (e) => { e.stopPropagation(); trashConv(c.id, c.title); } }, icon('trash')))));
@@ -557,6 +599,7 @@ $('#conv-search').addEventListener('input', renderConversations);
 async function loadConversations() {
   ({ conversations: convs } = await api('/api/conversations'));
   renderConversations();
+  renderChatTabs();
 }
 
 function setHead(title) {
@@ -568,35 +611,57 @@ function setHead(title) {
   $('#conv-meta').textContent = c ? `${c.count} messages` : '';
 }
 
+// The saved chat may not contain this run's user message yet; show it so the thread reads correctly.
+const conv0Needs = (run) => !msgs.some((m) => m.role === 'user' && m.text === run.userMsg.text && (m.ts ?? 0) >= run.sentAt - 5000);
 const draftKey = () => `homeai-draft:${convId ?? 'new'}`;
 async function openConversation(id) {
-  if (sending) return toast('Wait for the current reply or press Stop', 'bad');
+  const navigation = ++chatNavigation;
   sessionStorage.setItem(draftKey(), $('#prompt').value);
+  composerDrafts.set(convId, { pin: $('#pin').value, route: $('#route').value, project: $('#project').value, pending });
   convId = id;
+  if (id) openChats.add(id);
+  chatLoading = !!id;
+  reattachRunId = null;
+  unread.delete(id);
+  const local = runFor(id);
+  for (const r of runs) r.viewing = false;
+  syncComposer();
+  $('#slash-menu').hidden = true;
+  $('.chat-actions').open = false;
   if (id) localStorage.setItem('homeai-last-conversation', id); else localStorage.removeItem('homeai-last-conversation');
   msgs = [];
   if (id) {
-    const conv = await api(`/api/conversations/${encodeURIComponent(id)}`);
+    let conv;
+    try { conv = await api(`/api/conversations/${encodeURIComponent(id)}`); }
+    catch (e) {
+      if (navigation !== chatNavigation) return;
+      chatLoading = false;
+      setHead('Chat unavailable');
+      renderThread(); syncComposer();
+      toast(`Could not open chat: ${e.message}. Select it to retry.`, 'bad');
+      return;
+    }
+    if (navigation !== chatNavigation) return;
     if (conv.taskType && routeExists(conv.taskType)) { $('#route').value = conv.taskType; syncProjectPicker(); }
     msgs = conv.messages.map((m) => ({ ...m }));
     setHead(conv.title);
-    if (conv.run?.status === 'running') {
+    if (conv.run?.status === 'running' && !local) {
       // Refresh/reopen observes the detached run instead of starting another one.
       const started = conv.run.started;
       // Reattached Stop: the service still holds this run under its request id.
       const reRun = conv.run.runId;
       const stopBtn = $('#stop');
-      if (reRun) { activeRunId = reRun; stopBtn.hidden = false; }
-      const done = () => { if (activeRunId === reRun) activeRunId = null; if (!sending) stopBtn.hidden = true; };
+      if (reRun) { reattachRunId = reRun; stopBtn.hidden = false; }
+      const done = () => { if (reattachRunId === reRun) reattachRunId = null; if (convId === id) syncComposer(); };
       const poll = async () => {
-        if (convId !== id) return done();
+        if (navigation !== chatNavigation) return;
         const saved = await api(`/api/conversations/${encodeURIComponent(id)}`).catch(() => null);
         // A restart can make several polls fail. Keep observing the same saved run.
         if (!saved) return setTimeout(poll, 3000);
-        if (convId !== id) return;
+        if (navigation !== chatNavigation) return;
         if (saved.run?.status === 'running' && saved.run.started === started) return setTimeout(poll, 3000);
         done();
-        msgs = saved.messages.map(m => ({...m})); renderThread(); loadConversations();
+        msgs = saved.messages.map(m => ({...m})); renderThread(); loadConversations().catch(() => {});
       };
       setTimeout(poll, 3000);
       toast('Your saved request is still running. Its reply will appear here.');
@@ -605,14 +670,34 @@ async function openConversation(id) {
     setHead('New chat');
     if (config) { $('#route').value = startRoute(); syncProjectPicker(); }
   }
+  const draft = composerDrafts.get(id);
+  if (draft?.route && routeExists(draft.route)) $('#route').value = draft.route;
+  syncProjectPicker();
+  $('#pin').value = draft?.pin ?? '';
+  syncModels();
+  if (draft?.project) $('#project').value = draft.project;
+  pending = draft?.pending ?? [];
+  renderAttachments();
+  chatLoading = false;
   renderThread();
+  if (local) {
+    local.viewing = runs.has(local);
+    // This browser is still waiting on this chat: show its live bubble again.
+    if (conv0Needs(local)) { msgs.push(local.userMsg); $('#thread').append(messageEl(local.userMsg, msgs.length - 1)); }
+    $('#thread').querySelector('.welcome')?.remove();
+    $('#thread').append(local.live);
+    scrollDown(true);
+  }
+  syncComposer();
   $('#prompt').value = sessionStorage.getItem(draftKey()) ?? '';
   autosize();
-  await loadConversations();
+  await loadConversations().catch(e => toast(e.message, 'bad'));
+  if (navigation !== chatNavigation) return;
   setHead($('#conv-title').textContent);
   $('#prompt').focus();
 }
 $('#new-chat').addEventListener('click', () => { show('chat'); openConversation(null); });
+$('#new-private-chat').addEventListener('click', () => show('private'));
 $('#rename-chat').addEventListener('click', async () => {
   const title = await ask('Rename conversation', '', $('#conv-title').textContent);
   if (!title?.trim()) return;
@@ -637,9 +722,10 @@ $('#export-chat').addEventListener('click', () => {
 // ---- Archive / delete / restore (delete = trash folder, always restorable) ----
 const refreshChatLists = async () => { await loadConversations(); if (current === 'chats') await loadChats(); };
 async function afterRemoved(id) {
+  openChats.delete(id);
   pins.delete(id);
   savePins();
-  if (id === convId && !sending) await openConversation(null);
+  if (id === convId) await openConversation(null);
   await refreshChatLists();
 }
 async function restoreConv(id, { open = false } = {}) {
@@ -864,12 +950,13 @@ $('#prompt').addEventListener('keydown', (e) => {
 });
 
 // ---- Streaming send ----
-let chatAbort = null;
-let activeRunId = null;
+
 // Stop asks the service to cancel the run (the server keeps running a chat when the connection drops, so Stop must be explicit).
 $('#stop').addEventListener('click', () => {
-  if (activeRunId) api(`/api/runs/${encodeURIComponent(activeRunId)}/cancel`, { method: 'POST', body: {} }).catch(() => {});
-  chatAbort?.abort();
+  const r = runHere();
+  const id = r?.runId ?? reattachRunId;
+  if (id) api(`/api/runs/${encodeURIComponent(id)}/cancel`, { method: 'POST', body: {} }).catch(() => {});
+  r?.abort.abort();
 });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // Waits for the service to save the reply after the connection dropped. Resolves with the conversation, or null after the limit.
@@ -887,7 +974,7 @@ async function awaitSavedReply(id, since, status) {
 
 // approve: run the pending plan; text (optional) is sent as extra instructions.
 async function send(text, { approve = false } = {}) {
-  if (sending || (!approve && !text.trim())) return;
+  if (chatLoading || reattachRunId || runHere() || (!approve && !text.trim())) return;
   text = text.trim();
   if (approve && pending.length) return toast('Remove the attached images before approving a plan', 'bad');
   const slash = !approve && /^\/(\w+)\s*(.*)$/.exec(text);
@@ -895,12 +982,12 @@ async function send(text, { approve = false } = {}) {
     const s = SLASH.find((x) => x.cmd === `/${slash[1].toLowerCase()}`);
     if (s) { $('#prompt').value = ''; autosize(); return s.run(slash[2].trim()); }
   }
-  sending = true;
   if (text) remember(text);
-  $('#send').disabled = true;
-  $('#stop').hidden = false;
   const images = pending.map(({ name, mediaType, data }) => ({ name, mediaType, data }));
   const shots = pending.map((p) => p.url);
+  const keptPending = pending;
+  pending = [];
+  renderAttachments();
   $('#prompt').value = '';
   sessionStorage.removeItem(draftKey());
   autosize();
@@ -921,97 +1008,111 @@ async function send(text, { approve = false } = {}) {
   const status = h('div', { class: 'meta' }, 'Starting…');
   const live = h('div', { class: 'm bot live' }, h('div', { class: 'bubble' }, tools, body), status);
   thread.append(live);
+  const runId = (crypto.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`);
+  const sentAt = Date.now();
+  // This run keeps going if the user opens another chat; only its own thread, not the shared composer, is updated then.
+  const run = { runId, convId, viewing: true, started: sentAt, sentAt, abort: new AbortController(), live, userMsg, title: $('#conv-title').textContent };
+  runs.add(run);
+  syncComposer();
+  renderConversations();
   scrollDown(true);
   let acc = '';
   let raf = 0;
-  const paint = () => { raf = 0; const keep = atBottom(); body.replaceChildren(markdown(acc)); if (keep) scrollDown(true); };
-  const started = Date.now();
-  const tick = setInterval(() => ($('#busy').textContent = secs(Date.now() - started)), 250);
-  chatAbort = new AbortController();
-  const runId = (crypto.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`);
-  activeRunId = runId;
-  const wasNew = !convId;
-  const sentAt = Date.now();
+  const paint = () => { raf = 0; const keep = run.viewing && atBottom(); body.replaceChildren(markdown(acc)); if (keep) scrollDown(true); };
+  const tick = setInterval(() => { if (run.viewing) $('#busy').textContent = secs(Date.now() - run.started); }, 250);
+  const wasNew = !run.convId;
   let reached = false; // true once the service has answered; before that a failure means nothing was saved
   try {
     const req = approve
-      ? { conversationId: convId, approve: true, prompt: text || undefined, connector: $('#pin').value || undefined, runId }
+      ? { conversationId: run.convId, approve: true, prompt: text || undefined, connector: $('#pin').value || undefined, runId }
       : {
-          conversationId: convId ?? undefined, prompt: text, taskType: $('#route').value, connector: $('#pin').value || undefined, runId,
+          conversationId: run.convId ?? undefined, prompt: text, taskType: $('#route').value, connector: $('#pin').value || undefined, runId,
           images: images.length ? images : undefined, project: $('#project-label').hidden ? undefined : $('#project').value || undefined,
         };
     const r = await stream('/api/chat', req, (ev) => {
       reached = true;
-      if (ev.type === 'conversation') { convId = ev.id; localStorage.setItem('homeai-last-conversation', convId); }
+      if (ev.type === 'conversation') {
+        run.convId = ev.id;
+        openChats.add(ev.id);
+        if (run.viewing) { convId = ev.id; localStorage.setItem('homeai-last-conversation', convId); }
+        loadConversations().catch(() => {});
+      }
       else if (ev.type === 'routing') status.textContent = 'Checking what this needs…';
       else if (ev.type === 'routed') status.textContent = `${routedLabel(ev)} · ${ev.reason}…`;
       else if (ev.type === 'attempt') { acc = ''; toolList.replaceChildren(); tools.hidden=true; status.textContent = `${ev.connector} · ${ev.model}…`; paint(); }
       else if (ev.type === 'delta') { acc += ev.text; if (!raf) raf = requestAnimationFrame(paint); }
-      else if (ev.type === 'tool') { tools.hidden=false; toolList.append(h('div', { class: 'tool' }, `${ev.name}${ev.summary ? `: ${ev.summary}` : ''}`)); toolSummary.textContent=`Activity · ${toolList.children.length} steps`; scrollDown(); }
+      else if (ev.type === 'tool') { tools.hidden=false; toolList.append(h('div', { class: 'tool' }, `${ev.name}${ev.summary ? `: ${ev.summary}` : ''}`)); toolSummary.textContent=`Activity · ${toolList.children.length} steps`; if (run.viewing) scrollDown(); }
       else if (ev.type === 'attempt-skipped') status.textContent = `${ev.connector} unavailable within current limits; checking alternatives…`;
       else if (ev.type === 'attempt-failed') status.textContent = `${ev.connector} failed (${ev.error}); trying next…`;
-    }, chatAbort.signal);
+    }, run.abort.signal);
     live.remove();
-    convId = r.conversation.id;
-    msgs.push({ role: 'assistant', ...r.reply });
-    thread.append(messageEl(msgs.at(-1), msgs.length - 1));
-    scrollDown(true);
-    pending = [];
-    renderAttachments();
+    run.convId = r.conversation.id;
+    if (run.viewing) {
+      convId = r.conversation.id;
+      msgs.push({ role: 'assistant', ...r.reply });
+      thread.append(messageEl(msgs.at(-1), msgs.length - 1));
+      scrollDown(true);
+    } else {
+      unread.add(r.conversation.id);
+      toast(`Reply ready in "${r.conversation.title}"`, 'ok', { label: 'Open', run: () => { show('chat'); openConversation(r.conversation.id); } });
+    }
     await loadConversations();
-    setHead(wasNew ? r.conversation.title : $('#conv-title').textContent);
+    if (run.viewing) setHead(wasNew ? r.conversation.title : $('#conv-title').textContent);
   } catch (err) {
     const stopped = err.name === 'AbortError';
     const dropped = !stopped && reached && (err.name === 'TypeError' || /Stream ended without a result/.test(err.message));
     if (dropped) {
       // The service keeps the run going and saves the reply. Wait for it instead of showing an error or re-sending.
       let saved = null;
-      if (!convId) {
+      if (!run.convId) {
         // The stream broke before the conversation-id event: ask the service where this request id ended up (never re-send).
-        for (let i = 0; i < 10 && !convId; i++) {
+        for (let i = 0; i < 10 && !run.convId; i++) {
           const f = await api(`/api/runs/${encodeURIComponent(runId)}`).catch(() => null);
-          if (f?.id) { convId = f.id; localStorage.setItem('homeai-last-conversation', convId); } else await sleep(1500);
+          if (f?.id) { run.convId = f.id; if (run.viewing) { convId = f.id; localStorage.setItem('homeai-last-conversation', convId); } } else await sleep(1500);
         }
       }
-      if (convId) {
+      if (run.convId) {
         status.textContent = 'Connection to the service dropped. Waiting for the reply to be saved…';
-        saved = await awaitSavedReply(convId, sentAt, status).catch(() => null);
+        saved = await awaitSavedReply(run.convId, sentAt, status).catch(() => null);
       }
       live.remove();
       if (saved) {
-        msgs = saved.messages.map((m) => ({ ...m }));
-        renderThread();
-        setHead(saved.title);
+        if (run.viewing) {
+          msgs = saved.messages.map((m) => ({ ...m }));
+          renderThread();
+          setHead(saved.title);
+        } else (unread.add(saved.id), toast(`Reply ready in "${saved.title}"`, 'ok', { label: 'Open', run: () => { show('chat'); openConversation(saved.id); } }));
         await loadConversations();
-      } else {
-        const m = { role: 'assistant', error: convId ? 'Lost the connection to the service and no reply was saved within 35 minutes. Open this chat from the list to check.' : 'Lost the connection to the service before the chat was created. Check the chat list.' };
+      } else if (run.viewing) {
+        const m = { role: 'assistant', error: run.convId ? 'Lost the connection to the service and no reply was saved within 35 minutes. Open this chat from the list to check.' : 'Lost the connection to the service before the chat was created. Check the chat list.' };
         msgs.push(m);
         thread.append(messageEl(m, msgs.length - 1));
         scrollDown(true);
-      }
+      } else toast(`Lost the connection while "${run.title}" was running. Open it from the list to check.`, 'bad');
       await loadConversations().catch(() => {});
     } else {
       live.remove();
-      const m = { role: 'assistant', error: stopped ? 'Stopped' : (reached ? err.message : `Could not reach the service: ${err.message}`), ...(acc ? { text: acc } : {}) };
-      msgs.push(m);
-      thread.append(messageEl(m, msgs.length - 1));
-      scrollDown(true);
-      // Put the prompt back so it can be resent (a dropped connection never reaches this branch, so nothing is sent twice).
-      if (!stopped) $('#prompt').value = text;
-      autosize();
+      const message = stopped ? 'Stopped' : (reached ? err.message : `Could not reach the service: ${err.message}`);
+      if (run.viewing) {
+        const m = { role: 'assistant', error: message, ...(acc ? { text: acc } : {}) };
+        msgs.push(m);
+        thread.append(messageEl(m, msgs.length - 1));
+        scrollDown(true);
+        // Put the prompt and attachments back so it can be resent (a dropped connection never reaches this branch, so nothing is sent twice).
+        if (!stopped) { $('#prompt').value = text; if (!pending.length) { pending = keptPending; renderAttachments(); } }
+        autosize();
+      } else if (!stopped) toast(`"${run.title}" failed: ${message}`, 'bad');
     }
   } finally {
-    activeRunId = null;
     cancelAnimationFrame(raf);
     clearInterval(tick);
-    chatAbort = null;
-    $('#busy').textContent = '';
-    $('#send').disabled = false;
-    $('#stop').hidden = true;
-    sending = false;
-    $('#prompt').focus();
+    runs.delete(run);
+    syncComposer();
+    renderConversations();
+    if (run.viewing) $('#prompt').focus();
   }
 }
+
 $('#composer').addEventListener('submit', (e) => { e.preventDefault(); send($('#prompt').value); });
 
 function syncProjectPicker() {
@@ -1166,11 +1267,14 @@ async function loadStatus(fresh) {
   const s = await api(`/api/status${fresh ? '?fresh=1' : ''}`);
   $('#status-time').textContent = `Checked ${new Date(s.checkedAt).toLocaleTimeString()}`;
   $('#status-backends').replaceChildren(...Object.entries(s.backends).map(([k, b]) => h('div', { class: `card ${b.ok ? 'ok' : 'bad'}` }, h('div', { class: 'k' }, k), h('div', { class: 'v', style: 'font-size:16px' }, b.ok ? 'Available' : 'Unavailable'), h('div', { class: 'd' }, b.detail ?? ''))));
+  const statusRow = ([name, c]) => h('tr', {}, h('td', {}, h('strong', {}, c.label || name), c.label ? h('div', { class: 'muted mono' }, name) : null), h('td', {}, c.kind), h('td', { class: 'mono' }, c.model),
+    h('td', {}, h('span', { class: `pill ${c.ok ? 'ok' : 'bad'}` }, c.ok ? (c.kind === 'ollama' ? (c.loaded ? 'loaded' : 'installed') : 'backend available') : 'unavailable')),
+    h('td', { class: 'muted' }, c.detail ?? (c.kind === 'ollama' && !c.loaded ? 'loads on first use' : ''), c.note ? h('div', {}, c.note) : null));
   $('#status-conn').replaceChildren(h('table', {},
-    h('thead', {}, h('tr', {}, ['Connector', 'Kind', 'Model', 'State', 'Detail'].map((x) => h('th', {}, x)))),
-    h('tbody', {}, Object.entries(s.connectors).map(([name, c]) => h('tr', {}, h('td', {}, h('strong', {}, name)), h('td', {}, c.kind), h('td', { class: 'mono' }, c.model),
-      h('td', {}, h('span', { class: `pill ${c.ok ? 'ok' : 'bad'}` }, c.ok ? (c.loaded ? 'ready (loaded)' : 'ready') : 'unavailable')),
-      h('td', { class: 'muted' }, c.detail ?? (c.kind === 'ollama' && !c.loaded ? 'loads on first use' : '')))))));
+    h('thead', {}, h('tr', {}, ['Model', 'Kind', 'Model id', 'State', 'Detail'].map((x) => h('th', {}, x)))),
+    ...groupByCategory(Object.entries(s.connectors).map(([id, c]) => [id, { ...config?.connectors[id], ...c }])).map(([cat, items]) => h('tbody', {},
+      h('tr', { class: 'cat-row' }, h('th', { colspan: 5 }, `${cat} · ${items.length}`)),
+      ...items.map(statusRow)))));
 }
 loaders.status = () => loadStatus(false);
 $('#status-refresh').addEventListener('click', () => loadStatus(true).catch((e) => ($('#status-time').textContent = e.message)));
@@ -1806,9 +1910,85 @@ function openUserMenu() {
   $('#who').setAttribute('aria-expanded', 'true');
   $('#user-menu button')?.focus();
 }
-$('#who').addEventListener('click', (e) => { e.stopPropagation(); if ($('#user-menu').hidden) openUserMenu(); else closeUserMenu(); });
+$('#who').addEventListener('click', (e) => {
+  e.stopPropagation();
+  // Admins get the full admin panel; other devices get the small account menu.
+  if (whoami?.scopes.includes('admin')) { closeUserMenu(); return openAdmin(); }
+  if ($('#user-menu').hidden) openUserMenu(); else closeUserMenu();
+});
 document.addEventListener('click', (e) => { if (!$('#user-menu').hidden && !e.target.closest('.menu-wrap')) closeUserMenu(); });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#user-menu').hidden) { closeUserMenu(); $('#who').focus(); } });
+
+// ---- Admin panel (top-right account chip) ----
+async function openAdmin() {
+  const dlg = $('#admin-dialog');
+  if (!dlg.open) dlg.showModal();
+  $('#who').setAttribute('aria-expanded', 'true');
+  // Navigation stays available even if one of the service probes is slow.
+  $('#admin-body').replaceChildren(h('p', { role: 'status' }, 'Checking service…'));
+  try { await renderAdmin(); }
+  catch (e) { $('#admin-body').replaceChildren(h('p', { role: 'alert' }, `Admin data unavailable: ${e.message}`), h('button', { type: 'button', onclick: openAdmin }, 'Retry')); }
+}
+let adminRender = 0;
+async function renderAdmin(fresh = false) {
+  const revision = ++adminRender;
+  const body = $('#admin-body');
+  const isAdmin = whoami?.scopes.includes('admin');
+  const bounded = (promise) => {
+    let timer;
+    return Promise.race([promise, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Service check timed out. Retry with Recheck now.')), 6000); })]).finally(() => clearTimeout(timer));
+  };
+  const [status, usage, sched, ver] = await Promise.all([
+    bounded(api(`/api/status${fresh ? '?fresh=1' : ''}`)).catch((e) => ({ error: e.message })),
+    bounded(api('/api/usage?hours=24')).catch(() => null),
+    bounded(api('/api/schedule')).catch(() => null),
+    bounded(fetch('/api/health').then((r) => r.json())).catch(() => null),
+  ]);
+  if (revision !== adminRender) return;
+  const sec = (title, ...kids) => h('section', { class: 'adm-sec' }, h('h4', {}, title), ...kids);
+  const kv = (k, v) => h('div', { class: 'adm-kv' }, h('span', { class: 'muted' }, k), h('span', {}, v));
+  const act = (label, fn, cls = 'ghost sm') => h('button', { type: 'button', class: cls, onclick: async (e) => { e.target.disabled = true; try { await fn(); } catch (err) { toast(err.message, 'bad'); } finally { e.target.disabled = false; } } }, label);
+  const backends = Object.entries(status?.backends ?? {});
+  const queue = Object.entries(sched?.queue ?? {});
+  const localRuns = [...runs, ...convs.filter(c => c.running && !runFor(c.id)).map(c => ({ convId: c.id, title: c.title, detached: true }))];
+  const total = usage?.total;
+  body.replaceChildren(
+    sec('Service',
+      kv('Version', ver ? `v${ver.version} · online` : 'unreachable'),
+      kv('Signed in as', `${whoami?.name ?? 'unknown'} (${(whoami?.scopes ?? []).join(', ') || 'no access'})`),
+      kv('Checked', status?.checkedAt ? when(status.checkedAt) : '—'),
+      status?.error ? h('p', { class: 'muted' }, `Status unavailable: ${status.error}`) : null,
+      h('div', { class: 'adm-row' }, ...backends.map(([k, v]) => h('span', { class: `pill ${v.ok ? 'ok' : 'bad'}`, title: v.detail ?? '' }, k))),
+      h('div', { class: 'adm-row' },
+        act('Recheck now', () => renderAdmin(true)),
+        act('Reload settings', async () => { await loadConfig(); applyFeatures(); toast('Settings reloaded', 'ok'); }),
+        act('Full status page', () => { $('#admin-dialog').close(); show('status'); }))),
+    sec('Work in progress',
+      queue.length ? h('div', { class: 'adm-list' }, queue.map(([k, q]) => kv(k, `${q.active}/${q.limit} running, ${q.queued} waiting`))) : h('p', { class: 'muted' }, sched ? 'No model queues are busy.' : 'Queue status unavailable.'),
+      localRuns.length
+        ? h('div', { class: 'adm-list' }, localRuns.map((r) => h('div', { class: 'adm-kv' }, h('span', {}, `${r.title || 'New chat'} · ${r.detached ? 'saved run' : secs(Date.now() - r.started)}`), h('span', {},
+          act('Open', () => { if (r.convId) { $('#admin-dialog').close(); show('chat'); return openConversation(r.convId); } toast('This chat has no saved ID yet'); }),
+          !r.detached ? act('Stop', async () => { await api(`/api/runs/${encodeURIComponent(r.runId)}/cancel`, { method: 'POST', body: {} }); r.abort.abort(); await renderAdmin(); }, 'danger sm') : null))))
+        : h('p', { class: 'muted' }, 'No active chats found.')),
+    sec('Usage, last 24 hours',
+      total ? kv('Calls / tokens / cost', `${n(total.calls)} calls · ${n(total.inputTokens + total.outputTokens)} tokens · $${(total.costUsd ?? 0).toFixed(2)}`) : h('p', { class: 'muted' }, 'Usage unavailable.'),
+      h('p', { class: 'muted' }, 'Counters are informational only and never block a request. Clearing keeps chats and the ledger.'),
+      isAdmin && config?.features?.usageReset ? h('div', { class: 'adm-row' }, act('Clear usage', async () => { await api('/api/usage/reset', { method: 'POST' }); toast('Usage cleared. Chat history preserved.'); await renderAdmin(); })) : null),
+    sec('Manage',
+      h('div', { class: 'adm-row' },
+        ...[['Devices and tokens', 'devices'], ['Connections', 'connections'], ['Jobs', 'jobs'], ['Terminal', 'terminal'], ['Config', 'config'], ['History', 'history'], ['Settings', 'settings']]
+          .filter(([, t]) => { const el = $(`.nav-item[data-nav="${t}"]`); return !el || !el.hidden; })
+          .map(([label, t]) => act(label, () => { $('#admin-dialog').close(); show(t); })))),
+    sec('This browser',
+      h('div', { class: 'adm-row' },
+        act('Copy diagnostics', async () => { await copyText(JSON.stringify({ version: ver?.version, user: whoami?.name, scopes: whoami?.scopes, backends: Object.fromEntries(backends.map(([k, v]) => [k, v.ok])), queue: sched?.queue, userAgent: navigator.userAgent, at: new Date().toISOString() }, null, 2)); }),
+        act('Enter a different token…', async () => { $('#admin-dialog').close(); await askToken(); whoami = await api('/api/whoami').catch(() => null); applyFeatures(); toast('Token updated', 'ok'); }),
+        act('Forget saved token', () => { $('#admin-dialog').close(); $('#forget-token').click(); }))),
+  );
+}
+$('#admin-close').addEventListener('click', () => $('#admin-dialog').close());
+$('#admin-dialog').addEventListener('close', () => { adminRender++; $('#who').setAttribute('aria-expanded', 'false'); });
+$('#admin-dialog').addEventListener('click', (e) => { if (e.target === $('#admin-dialog')) $('#admin-dialog').close(); });
 
 // ---- Command palette ----
 let palIdx = 0;
@@ -1821,6 +2001,7 @@ function paletteCommands(q) {
   }
   items.push({ group: 'Go to', label: 'All chats', hint: SUBS.chats, run: () => show('chats') });
   items.push({ group: 'Go to', label: 'Settings', hint: SUBS.settings, run: () => show('settings') });
+  if (whoami?.scopes.includes('admin')) items.push({ group: 'Actions', label: 'Open admin panel', hint: '', run: openAdmin });
   items.push(
     { group: 'Actions', label: 'New chat', hint: 'Ctrl+Shift+O', run: () => { show('chat'); openConversation(null); } },
     { group: 'Actions', label: 'Toggle sidebar', hint: 'Ctrl+B', run: toggleSidebar },
@@ -1830,10 +2011,10 @@ function paletteCommands(q) {
     { group: 'Actions', label: 'Check service status now', hint: '', run: () => { show('status'); loadStatus(true).catch((e) => toast(e.message, 'bad')); } },
   );
   for (const r of Object.keys(config?.routes ?? {})) items.push({ group: 'Route', label: `Use route: ${r}`, hint: r === config.default ? 'default' : '', run: () => { show('chat'); setRoute(r); } });
-  for (const [name, c] of Object.entries(config?.connectors ?? {})) items.push({ group: 'Model', label: `Pin model: ${name}`, hint: c.model, run: () => { show('chat'); setModel(name); } });
+  for (const [cat, models] of groupByCategory(Object.entries(config?.connectors ?? {}))) for (const [name, c] of models) items.push({ group: `Model · ${cat}`, label: `Pin model: ${c.label || name}`, hint: [c.model, c.note].filter(Boolean).join(' · '), run: () => { show('chat'); setModel(name); } });
   for (const c of convs.slice(0, 40)) items.push({ group: 'Conversations', label: c.title, hint: when(c.updated), run: () => { show('chat'); openConversation(c.id); } });
   const terms = q.toLowerCase().split(/\s+/).filter(Boolean);
-  return items.filter((i) => terms.every((t) => `${i.label} ${i.group}`.toLowerCase().includes(t))).slice(0, 40);
+  return items.filter((i) => terms.every((t) => `${i.label} ${i.group} ${i.hint}`.toLowerCase().includes(t))).slice(0, 40);
 }
 function renderPalette() {
   palItems = paletteCommands($('#palette-input').value);

@@ -65,6 +65,58 @@ export function setupMedia({ h, api, stream, mediaView }) {
     libraryFiles = files;
     renderGallery();
   }
+  // ---- persistent studio chat: one saved conversation (shared store), survives tab switches, refresh and restarts ----
+  const KEY = 'homeai-studio-conversation';
+  let convId = localStorage.getItem(KEY) || null, watching = false, timer = null, startedAt = 0;
+  const thread = h('div', { id: 'studio-thread', class: 'studio-thread', 'aria-live': 'polite' });
+  const newChat = h('button', { class: 'ghost sm', type: 'button', onclick: () => { if (runId || watching) return; convId = null; localStorage.removeItem(KEY); renderThread(null); } }, 'New studio chat');
+  const threadHead = h('div', { class: 'library-head studio-thread-head' }, h('h2', {}, 'Studio chat'), h('span', { class: 'muted' }, 'Saved automatically; also listed under Chats'), h('span', { class: 'spacer' }), newChat);
+  form.after(threadHead, thread);
+  function renderThread(conv) {
+    const msgs = conv?.messages ?? [];
+    thread.replaceChildren(...msgs.map((m) => m.role === 'user'
+      ? h('div', { class: 'm user' }, h('div', { class: 'bubble' }, m.text))
+      : h('div', { class: `m bot${m.error ? ' error' : ''}` }, h('div', { class: 'bubble' },
+          m.error ? h('p', {}, m.error) : (m.text ? h('p', {}, m.text) : null),
+          m.files?.length ? h('div', { class: 'inline-media' }, m.files.map(mediaView)) : null))));
+    if (!msgs.length) thread.append(h('p', { class: 'muted studio-thread-empty' }, 'Your requests and results will stay here, even if you leave this page.'));
+    thread.scrollTop = thread.scrollHeight;
+  }
+  async function fetchConv() {
+    if (!convId) return null;
+    try { return await api(`/api/conversations/${encodeURIComponent(convId)}`); }
+    catch (e) { if (/not found|404/i.test(e.message)) { convId = null; localStorage.removeItem(KEY); return null; } throw e; }
+  }
+  function setBusy(on) {
+    form.classList.toggle('generating', on);
+    generate.disabled = on || !model.value; cancel.hidden = !on; cancel.disabled = false; mode.disabled = on; model.disabled = on;
+  }
+  // After a refresh or a dropped connection the service keeps generating; follow the saved run instead of re-sending.
+  function watchRun(conv) {
+    if (watching) return;
+    watching = true; runId = conv.run?.runId ?? runId; startedAt = conv.run?.started ?? Date.now();
+    setBusy(true); status.classList.remove('bad');
+    const tick = async () => {
+      status.textContent = `Generating locally - ${Math.floor((Date.now() - startedAt) / 1000)} seconds. You can leave this page; the result is saved to this chat.`;
+      let cur = null;
+      try { cur = await fetchConv(); } catch { /* temporary; keep waiting */ }
+      if (cur) renderThread(cur);
+      if (!cur || cur.run?.status !== 'running') {
+        watching = false; runId = null; setBusy(false);
+        const last = cur?.messages?.at(-1);
+        if (last?.error) showError(new Error(last.error)); else status.textContent = 'Finished. The result is in your studio chat and library.';
+        await loadGallery().catch(showError);
+        return;
+      }
+      timer = setTimeout(tick, 3000);
+    };
+    tick();
+  }
+  async function loadSession() {
+    const conv = await fetchConv();
+    renderThread(conv);
+    if (conv?.run?.status === 'running' && !runId) watchRun(conv);
+  }
   cancel.addEventListener('click', async () => {
     if (!runId) return;
     cancel.disabled = true;
@@ -73,29 +125,50 @@ export function setupMedia({ h, api, stream, mediaView }) {
   });
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
-    if (runId || !prompt.value.trim()) return;
+    if (runId || watching || !prompt.value.trim()) return;
     const params = {};
     for (const [k,input] of Object.entries(fields)) if (!input.parentElement.hidden && input.value !== '') params[k] = Number(input.value);
     if (mode.value === 'audio') params.lyrics = lyrics.value;
     else params.negative = negative.value;
     runId = crypto.randomUUID();
-    status.classList.remove('bad'); form.classList.add('generating');
-    generate.disabled = true; cancel.hidden=false; cancel.disabled = false; mode.disabled = true; model.disabled = true;
+    const text = prompt.value.trim();
+    status.classList.remove('bad'); setBusy(true);
     const start = Date.now();
     const update = () => { status.textContent = `Generating locally - ${Math.floor((Date.now()-start)/1000)} seconds. You can use other tabs while it runs.`; };
-    update(); const timer = setInterval(update,1000);
+    update(); const clock = setInterval(update,1000);
+    thread.querySelector('.studio-thread-empty')?.remove();
+    thread.append(h('div', { class: 'm user' }, h('div', { class: 'bubble' }, text)));
+    thread.scrollTop = thread.scrollHeight;
+    let reached = false;
     try {
-      const result = await stream('/api/task', { taskType:mode.value === 'audio' ? 'music' : mode.value, connector:model.value, prompt:prompt.value.trim(), params, runId });
-      if (!result.ok) throw new Error(result.error || 'Generation failed; see History for details.');
-      clearInterval(timer);
-      status.textContent = `Saved ${result.files?.length ?? 0} file(s) in ${((Date.now()-start)/1000).toFixed(1)} seconds.`;
+      const result = await stream('/api/chat', { conversationId: convId ?? undefined, taskType:mode.value === 'audio' ? 'music' : mode.value, connector:model.value, prompt:text, params, runId }, (ev) => {
+        reached = true;
+        if (ev.type === 'conversation') { convId = ev.id; localStorage.setItem(KEY, convId); }
+      });
+      clearInterval(clock);
+      const files = result.reply?.files?.length ?? 0;
+      if (result.reply && result.reply.ok === false) throw new Error(result.reply.error || 'Generation failed; see History for details.');
+      status.textContent = `Saved ${files} file(s) in ${((Date.now()-start)/1000).toFixed(1)} seconds.`;
+      runId = null;
+      renderThread(await fetchConv());
       await loadGallery();
-    } catch(e) { clearInterval(timer); showError(e); }
-    finally { runId=null; form.classList.remove('generating'); generate.disabled=!model.value; cancel.hidden=true; mode.disabled=false; model.disabled=false; }
+    } catch(e) {
+      clearInterval(clock);
+      const dropped = reached && convId && (e.name === 'TypeError' || /Stream ended without a result/.test(e.message));
+      if (dropped) {
+        const conv = await fetchConv().catch(() => null);
+        if (conv?.run?.status === 'running') { runId = null; watchRun(conv); return; }
+        runId = null; renderThread(conv);
+        const last = conv?.messages?.at(-1);
+        if (last?.error) showError(new Error(last.error)); else status.textContent = 'Finished. The result is in your studio chat.';
+        await loadGallery().catch(() => {});
+      } else { showError(e); if (convId) renderThread(await fetchConv().catch(() => null)); }
+    }
+    finally { if (!watching) { runId = null; setBusy(false); } }
   });
   return async () => {
     const config = await api('/api/config'); connectors = config.connectors;
-    if (!runId) models();
-    await loadGallery();
+    if (!runId && !watching) models();
+    await Promise.all([loadGallery(), loadSession()]);
   };
 }

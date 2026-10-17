@@ -72,3 +72,12 @@ test('interrupted media resumes the saved scene rather than generating a resume 
  await o.chat({conversationId:c.id,prompt:'Please resume the interrupted task',connector:'text'});
  assert.equal(actual.e.connector,'v');assert.match(actual.a.prompt,/cat climbing a wall/);assert.doesNotMatch(actual.a.prompt,/Conversation so far/);
 });
+test('studio request keeps chosen format/model and stays in one persistent conversation',async()=>{
+ const s=store();const seen=[];
+ const o=createOrchestrator({config,conversations:s,run:async(e,a)=>(seen.push(e.model),{ok:true,text:'saved',files:[{name:'a.mp4',kind:'video'}]})});
+ const r1=await o.chat({prompt:'make a song about a sunny video game',taskType:'video',connector:'v'});
+ const r2=await o.chat({conversationId:r1.conversation.id,prompt:'a quiet harbor',taskType:'image',connector:'i'});
+ assert.deepEqual(seen,['Wan','SDXL']);
+ const c=s.get(r1.conversation.id);assert.equal(c.messages.length,4);assert.equal(c.messages[1].files[0].name,'a.mp4');
+ assert.equal(r2.conversation.id,r1.conversation.id);
+});

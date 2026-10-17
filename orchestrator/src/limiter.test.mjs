@@ -47,3 +47,11 @@ test('rejects invalid limits', () => {
   assert.throws(() => createLimiter({ limits: { a: 0 } }), /positive integer/);
   assert.throws(() => createLimiter({ fallback: 1.5 }), /positive integer/);
 });
+
+test('prototype property names use the fallback rather than queueing forever', async () => {
+  const lim = createLimiter();
+  for (const key of ['constructor', 'toString', '__proto__']) {
+    assert.equal(await lim.run(key, () => 'completed'), 'completed');
+    assert.equal(lim.stats()[key].limit, 1);
+  }
+});

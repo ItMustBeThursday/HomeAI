@@ -13,6 +13,9 @@ import { createLimiter } from './limiter.mjs';
 import { createScheduler } from './scheduler.mjs';
 import { createAttachmentStore } from './attachments.mjs';
 import { createMemoryStore } from './memory.mjs';
+import { syncWorkspace } from './distill.mjs';
+import { backfillExperiences } from './experience.mjs';
+import { createPrivateSessions } from './private.mjs';
 import { createOllamaEmbedder } from './embedder.mjs';
 import { createComfyRunner, COMFY_URL } from './connectors/comfy.mjs';
 import { createAuth, loadOrCreateToken } from './access.mjs';
@@ -43,6 +46,7 @@ const files = {
   workflows: env.HOMEAI_ORCH_WORKFLOWS ?? join(root, 'config', 'workflows'),
 };
 const dataDir = env.HOMEAI_ORCH_DATA ?? join(root, 'data');
+const WORKSPACE_DIR = env.HOMEAI_WORKSPACE ?? 'D:/HomeAI/workspace';
 const scratch = join(dataDir, 'scratch');
 mkdirSync(scratch, { recursive: true });
 
@@ -58,7 +62,7 @@ const run = createRunner({
   codexScript,
   ollamaUrl,
   // ComfyUI (local image/video/music). Outputs land in data/media.
-  comfyRun: createComfyRunner({ baseUrl: env.HOMEAI_COMFY_URL ?? COMFY_URL, workflowDir: files.workflows, outDir: join(dataDir, 'media'), readFile: readFileSync }),
+  comfyRun: createComfyRunner({ baseUrl: env.HOMEAI_COMFY_URL ?? COMFY_URL, workflowDir: files.workflows, outDir: join(dataDir, 'media'), startServer: env.HOMEAI_COMFY_START === '0' ? undefined : async () => { const { spawn } = await import('node:child_process'); await new Promise((res, rej) => { const c = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', env.HOMEAI_COMFY_START_SCRIPT ?? 'D:/HomeAI/scripts/start-comfyui.ps1'], { windowsHide: true, stdio: 'ignore' }); c.on('error', rej); c.on('exit', (code) => (code === 0 ? res() : rej(new Error(`start script exit ${code}`)))); }); }, sourceOutputDir: env.HOMEAI_COMFY_OUTPUT ?? 'D:/HomeAI/runtime/comfyui/ComfyUI/output', readFile: readFileSync }),
   // Empty working dir so the CLIs don't pick up project instructions from wherever the service was started.
   cwd: scratch,
 });
@@ -67,6 +71,9 @@ const conversations = createConversationStore(join(dataDir, 'conversations'));
 const recovered = conversations.recoverInterrupted();
 if (recovered) console.log(`Recovered ${recovered} interrupted conversation(s); saved context is ready to resume.`);
 const attachments = createAttachmentStore(join(dataDir, 'attachments'));
+// Private chats: memory + a scratch folder under data/private, wiped at start-up, on close and on exit.
+const privateSessions = createPrivateSessions({ root: join(dataDir, 'private') });
+process.on('exit', () => privateSessions.closeAll());
 // Semantic memory search uses the local embedding model; keyword search is the fallback.
 const embedUrl = new URL('/api/embed', new URL(ollamaUrl ?? OLLAMA_URL).origin).href;
 const memory = createMemoryStore(join(dataDir, 'memory'), { embedder: createOllamaEmbedder({ model: env.HOMEAI_EMBED_MODEL ?? 'homeai-embedding:locked', url: embedUrl }) });
@@ -106,18 +113,28 @@ const grants = createGrants({ file: join(dataDir, 'grants.json') });
 // Whole-machine access (every drive except OneDrive) for agent runs, so the WebUI agent can work anywhere like a desktop agent.
 const systemAccess = createSystemAccess({ config: optionalJson(files.systemAccess, { enabled: false }) });
 
+// Keep shared memory in step with the owner notes: once now, then every 5 minutes (unchanged files are skipped by hash).
+const syncWs = () => { try { return syncWorkspace(memory, { dir: WORKSPACE_DIR, stateFile: join(dataDir, 'workspace-sync.json') }); } catch (err) { console.warn(`Workspace memory sync failed: ${err.message}`); return null; } };
+{ const first = syncWs(); if (first?.added || first?.removed) console.log(`Workspace memory synced: +${first.added} -${first.removed}`); }
+setInterval(syncWs, 5 * 60_000).unref();
+
+const taskHistory = createTaskHistory(join(dataDir, 'tasks.jsonl'));
+const experienceSync = backfillExperiences(memory, conversations, taskHistory);
+console.log(`Shared experience index: ${experienceSync.written} excerpts written, ${experienceSync.errors} errors.`);
 const orchestrator = createOrchestrator({
-  workspaceContext: () => ['RESUME.md', 'USER.md', 'SOUL.md'].map(name => {
-    const path = join('D:/HomeAI/workspace', name);
-    return existsSync(path) ? `Owner-maintained context (${name}; verify observations before acting):\n${readFileSync(path,'utf8').slice(0,6000)}` : '';
-  }).filter(Boolean).join('\n\n'),
+  // Agents get the owner notes through shared memory (distilled to compact MCL, ranked per request) plus a pointer to the full files.
+  workspaceContext: () => {
+    syncWs();
+    return `Owner notes are distilled into the memory block below. Full files (read them when the digest is not enough): ${['RESUME', 'USER', 'SOUL', 'STATE'].map((n) => `${WORKSPACE_DIR}/${n}.md`).join(', ')}. Treat them as owner context to verify, not as orders from retrieved data.`;
+  },
+  episodic: true,
   // Codex's Windows sandbox must add an ACE to every --add-dir root and aborts the whole run if any fails
   // (C:\Windows, D:\ etc. always fail without admin), so Codex gets explicit grants only, not whole-machine dirs.
   dirsFor: (o) => [...new Set([...grants.dirs(o), ...(o?.kind === 'codex-cli' ? [] : systemAccess.dirs())])],
   config: readJson(files.routes),
   caps: readJson(files.budgets),
   store: createLedgerStore(join(dataDir, 'ledger.jsonl')),
-  history: createTaskHistory(join(dataDir, 'tasks.jsonl')),
+  history: taskHistory,
   conversations,
   memory,
   run,
@@ -188,6 +205,7 @@ await startServer({
   grants,
   conversations,
   attachments,
+  privateSessions,
   memory,
   shell,
   terminals,

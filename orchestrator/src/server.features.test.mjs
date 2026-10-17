@@ -315,6 +315,13 @@ test('memory API: admin writes, read scope reads, deletes go to trash', async ()
   assert.equal(add.status, 200);
   assert.equal((await call('POST', '/api/memory', { token: chatToken, body: { title: 'x', text: 'y' } })).status, 403);
   assert.equal((await call('GET', '/api/memory?q=router', { token: readToken })).json.notes[0].title, 'Router');
+  const packet = await call('GET', '/api/memory/context?q=router&maxChars=400', { token: readToken });
+  assert.equal(packet.status, 200);
+  assert.match(packet.json.text, /garage/);
+  assert.ok(packet.json.chars <= 400);
+  assert.equal((await call('GET', '/api/memory/context?q=router&maxChars=NaN')).status, 400);
+  assert.equal((await call('GET', '/api/memory/context?q=router&maxChars=12001')).status, 400);
+  assert.equal((await call('GET', '/api/memory/context?q=router', { token: '' })).status, 401);
   assert.equal((await call('PATCH', `/api/memory/${add.json.id}`, { body: { text: 'Now in the loft' } })).json.text, 'Now in the loft');
   assert.equal((await call('DELETE', `/api/memory/${add.json.id}`)).json.ok, true);
   assert.equal((await call('GET', '/api/memory')).json.notes.length, 0);
@@ -399,4 +406,14 @@ test('hostAllowed and isRemote', () => {
 test('usage reset is restricted to admin devices', async () => {
   assert.equal((await call('POST', '/api/usage/reset', { token: chatToken })).status, 403);
   assert.equal((await call('POST', '/api/usage/reset', { token: readToken })).status, 403);
+});
+
+test('memory MCL API: import (admin), export (read), stats', async () => {
+  const imp = await call('POST', '/api/memory/mcl', { body: { text: '@adam\n=pc:7900XT\n!be honest;^3' } });
+  assert.equal(imp.json.added, 2);
+  assert.equal((await call('POST', '/api/memory/mcl', { token: chatToken, body: { text: '=x:y' } })).status, 403);
+  assert.equal((await call('POST', '/api/memory/mcl', { body: {} })).status, 400);
+  const ex = await call('GET', '/api/memory/mcl', { token: readToken });
+  assert.match(ex.json.text, /@adam/);
+  assert.equal(ex.json.stats.records, 2);
 });

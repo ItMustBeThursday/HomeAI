@@ -97,6 +97,12 @@ test('ollama: busy model fails over after the start timeout', async () => {
   await assert.rejects(run({ kind: 'ollama', model: 'x' }, { prompt: 'p' }), /no output within 20 ms/);
 });
 
+test('ollama: a heavyweight can override the cold-load deadline', async () => {
+  const fetchImpl = async (url, init) => ({ ok: true, body: streamBody(['{"message":{"content":"ok"},"done":true}'], 80, init.signal) });
+  const run = createRunner({ fetchImpl, startTimeoutMs: 10 });
+  assert.equal((await run({ kind: 'ollama', model: 'large', startTimeoutMs: 1000 }, { prompt: 'p' })).text, 'ok');
+});
+
 test('rejects unknown kinds and missing codex script', async () => {
   const run = createRunner({});
   await assert.rejects(run({ kind: 'gpt', model: 'x' }, { prompt: 'p' }), /Unknown connector kind/);

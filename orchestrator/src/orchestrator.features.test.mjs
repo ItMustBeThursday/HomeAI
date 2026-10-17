@@ -102,19 +102,25 @@ test('agent routes need a project and add the agent rules; other routes refuse a
   assert.equal(o.isAgentRoute('does-not-exist'), false);
 });
 
-test('routes that opt into memory get matching notes in the system prompt; others do not', async () => {
+test('text routes share memory by default and an explicit false disables retrieval', async () => {
   const memory = createMemoryStore(mkdtempSync(join(tmpdir(), 'mem-')));
   memory.add({ title: 'Never touch OneDrive', text: 'Hard exclusion.', tags: ['core'] });
   memory.add({ title: 'Router', text: 'The wifi router is in the garage', tags: [] });
   const systems = [];
   const o = createOrchestrator({ config, memory, run: async (e, p) => (systems.push(p.system), ok('x')) });
   await o.task({ taskType: 'general', prompt: 'where is the wifi router', system: 'base' });
-  assert.match(systems[0], /base\n\nThings to remember/);
+  assert.match(systems[0], /base\n\n# MCL:/);
   assert.match(systems[0], /garage/);
   assert.match(systems[0], /OneDrive/);
   await o.task({ taskType: 'plain', prompt: 'where is the wifi router', system: 'base' });
-  assert.match(systems[1], /base$/);
+  assert.match(systems[1], /garage/);
   assert.match(systems[1], /Do the authorized work yourself/);
+  const next = structuredClone(config);
+  next.routes.plain.memory = false;
+  o.setConfig(next);
+  await o.task({ taskType: 'plain', prompt: 'where is the wifi router', system: 'base' });
+  assert.match(systems[2], /base$/);
+  assert.doesNotMatch(systems[2], /garage/);
 });
 
 test('chat stores image references and the project, and tells later turns an image was attached', async () => {

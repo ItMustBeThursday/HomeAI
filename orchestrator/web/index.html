@@ -24,6 +24,7 @@
     <!-- Conversations: moved under the Chat item in the sidebar by buildNav() -->
     <div id="conv-panel" class="conv-panel" hidden>
       <button id="new-chat" class="primary block"><span class="ico" data-icon="plus"></span>New chat</button>
+      <button id="new-private-chat" class="ghost block" data-feature="private" title="Nothing saved · local models only"><span class="ico" data-icon="lock"></span>New private chat</button>
       <input id="conv-search" type="search" placeholder="Filter conversations" aria-label="Filter conversations">
       <div id="conv-list" class="conv-list" role="list"></div>
       <button id="manage-chats" class="ghost sm" data-go="chats">Manage all chats…</button>
@@ -53,6 +54,7 @@
     <main>
       <!-- CHAT -->
       <section id="tab-chat" class="tab active">
+        <div id="chat-tabs" class="chat-tabs" role="group" aria-label="Open and working chats"></div>
         <div class="thread-wrap">
           <div class="thread-head">
             <h2 id="conv-title">New chat</h2>
@@ -76,7 +78,7 @@
             <div id="slash-menu" class="slash-menu" hidden></div>
             <div class="composer-row">
               <label class="sel">Route <select id="route"></select></label>
-              <label class="sel">Model <select id="pin"><option value="">Auto (route chain)</option></select></label>
+              <label class="sel">Model <select id="pin" aria-describedby="model-purpose"><option value="">Auto (route chain)</option></select></label>
               <label id="project-label" class="sel" hidden>Project <select id="project"></select></label>
               <button type="button" id="attach" class="ghost sm" data-feature="images" title="Attach images">Attach</button>
               <input type="file" id="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden>
@@ -86,6 +88,7 @@
               <button type="button" id="stop" class="danger sm" hidden>Stop</button>
               <button type="submit" class="primary" id="send">Send</button>
             </div>
+            <div id="model-purpose" class="muted" role="status"></div>
           </form>
         </div>
       </section>
@@ -340,6 +343,12 @@
     <input id="token-input" type="password" autocomplete="off" required class="block">
     <div class="row mt"><span class="spacer"></span><button class="primary">Save</button></div>
   </form>
+</dialog>
+
+<dialog id="admin-dialog" class="admin-dialog" aria-labelledby="admin-title">
+  <div class="adm-head"><h3 id="admin-title">Admin panel</h3><span class="spacer"></span><button type="button" id="admin-close" class="ghost sm" aria-label="Close admin panel">Close</button></div>
+  <div class="adm-row"><button type="button" data-go="status" class="ghost sm">Status</button><button type="button" data-go="config" class="ghost sm">Config</button><button type="button" data-go="devices" class="ghost sm">Devices</button><button type="button" data-go="settings" class="ghost sm">Settings</button></div>
+  <div id="admin-body" class="adm-body"><p class="muted">Loading…</p></div>
 </dialog>
 
 <dialog id="input-dialog">

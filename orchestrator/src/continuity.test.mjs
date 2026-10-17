@@ -66,3 +66,58 @@ test('connector failure, restart, then another model receives saved request and 
   assert.equal(msgs[0].text, 'refactor module');
   assert.equal(msgs.filter((m) => m.role === 'user').length, 2);
 });
+
+test('failure retains the final streamed fragment inside the flush interval', () => {
+  const d = dir(); let t = 5000;
+  const s = createConversationStore(d, { now: () => t });
+  const c = s.create();
+  s.begin(c.id, user('go'), { runId: 'run-finalfragment' });
+  s.progress(c.id, { type: 'delta', text: 'first ' });
+  t += 10;
+  s.progress(c.id, { type: 'delta', text: 'last fragment' });
+  s.finish(c.id, { role: 'assistant', error: 'connection failed' });
+  const recovered = createConversationStore(d).get(c.id);
+  assert.equal(recovered.messages.at(-1).partial, 'first last fragment');
+});
+
+test('valid JSON with a damaged schema or wrong id falls back to the snapshot', () => {
+  for (const damaged of [{}, { id: 'wrong-id-123', messages: [] }]) {
+    const d = dir(); const s = createConversationStore(d); const c = s.create();
+    s.append(c.id, user('saved'));
+    writeFileSync(join(d, `${c.id}.json`), JSON.stringify(damaged));
+    assert.equal(s.get(c.id).id, c.id);
+    assert.equal(s.list().length, 1);
+  }
+});
+
+test('archive and trash refuse active replies without losing the conversation', () => {
+  const d = dir(); const s = createConversationStore(d); const c = s.create();
+  s.begin(c.id, user('go'), { runId: 'run-active123' });
+  assert.throws(() => s.archive(c.id), /Stop the running reply/);
+  assert.throws(() => s.trash(c.id), /Stop the running reply/);
+  s.finish(c.id, { role: 'assistant', text: 'finished' });
+  assert.equal(s.get(c.id).messages.at(-1).text, 'finished');
+  s.archive(c.id);
+  assert.equal(s.list('archived').length, 1);
+});
+
+test('a delayed retry of an older turn remains deduplicated after newer turns and restart', async () => {
+  const d = dir(); const conversations = createConversationStore(d); let calls = 0;
+  const run = async () => (calls++, { ok: true, text: 'done' });
+  const o = createOrchestrator({ config, conversations, run });
+  const first = await o.chat({ prompt: 'first', cwd: 'D:/w', runId: 'run-original123' });
+  await o.chat({ conversationId: first.conversation.id, prompt: 'second', cwd: 'D:/w', runId: 'run-newer1234' });
+  const restarted = createOrchestrator({ config, conversations: createConversationStore(d), run });
+  const retry = await restarted.chat({ prompt: 'first', cwd: 'D:/w', runId: 'run-original123' });
+  assert.equal(retry.duplicate, true);
+  assert.equal(calls, 2);
+});
+
+test('one unrecoverable chat does not block startup recovery of other chats', () => {
+  const d = dir(); const s = createConversationStore(d);
+  writeFileSync(join(d, 'broken-chat-123.json'), '{');
+  const c = s.create(); s.begin(c.id, user('go'), { runId: 'run-good1234' });
+  assert.equal(createConversationStore(d).recoverInterrupted(), 1);
+  assert.equal(s.get(c.id).run.status, 'interrupted');
+  assert.equal(readFileSync(join(d, 'broken-chat-123.json'), 'utf8'), '{');
+});

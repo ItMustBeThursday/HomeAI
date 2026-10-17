@@ -40,6 +40,14 @@ test('notifications get no reply; bad JSON and unknown methods get errors', asyn
   assert.equal(JSON.parse(await s.handleLine(rpc(5, 'tools/call', { name: 'constructor' }))).error.code, -32602);
 });
 
+test('memory_context hands a bounded source packet to MCP clients', async () => {
+  const sent = [];
+  const s = createMcpServer({ api: async (method, path) => { sent.push([method, path]); return { text: '?calibration:0.937;&turn:source:2:0' }; } });
+  const r = await call(s, 'memory_context', { query: 'zephyr & calibration', maxChars: 1200 });
+  assert.match(r.content[0].text, /0\.937/);
+  assert.deepEqual(sent[0], ['GET', '/api/memory/context?q=zephyr%20%26%20calibration&maxChars=1200']);
+});
+
 test('ask sends the prompt, route and pinned model and reports who answered', async () => {
   const sent = [];
   const s = createMcpServer({ api: async (m, p, b) => (sent.push([m, p, b]), { ok: true, text: 'Paris', connector: 'local-main', model: 'qwen', taskType: 'general', ms: 1500, attempts: [{}] }) });

@@ -172,7 +172,7 @@ export function parseCodexJsonl(stdout) {
 
 // images: base64 strings (vision models only).
 // brief: a one-word classification call: no thinking, deterministic, a few tokens (about 0.1 s instead of seconds).
-export function buildOllamaRequest({ model, prompt, system, images = [], brief = false } = {}) {
+export function buildOllamaRequest({ model, prompt, system, images = [], brief = false, ctx } = {}) {
   need(model, 'model');
   need(prompt, 'prompt');
   const messages = [];
@@ -181,7 +181,7 @@ export function buildOllamaRequest({ model, prompt, system, images = [], brief =
     messages.push({ role: 'system', content: system });
   }
   messages.push(images.length ? { role: 'user', content: prompt, images } : { role: 'user', content: prompt });
-  return { url: OLLAMA_URL, body: { model, stream: false, messages, ...(brief ? { think: false, options: { temperature: 0, num_predict: 8 } } : {}) } };
+  return { url: OLLAMA_URL, body: { model, stream: false, messages, ...(brief ? { think: false, options: { temperature: 0, num_predict: 8, ...(ctx ? { num_ctx: ctx } : {}) } } : ctx ? { options: { num_ctx: ctx } } : {}) } };
 }
 
 export function parseOllamaResponse(json) {
