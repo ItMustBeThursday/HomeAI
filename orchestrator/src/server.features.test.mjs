@@ -315,6 +315,13 @@ test('memory API: admin writes, read scope reads, deletes go to trash', async ()
   assert.equal(add.status, 200);
   assert.equal((await call('POST', '/api/memory', { token: chatToken, body: { title: 'x', text: 'y' } })).status, 403);
   assert.equal((await call('GET', '/api/memory?q=router', { token: readToken })).json.notes[0].title, 'Router');
+  assert.equal((await call('POST', '/api/memory', { body: { title: 'Router', text: 'The router is in the garage', tags: ['home'] } })).json.duplicateOf, add.json.id);
+  const episode = await call('POST', '/api/memory', { body: { title: 'Router history', text: 'User said: Old router location', source: 'turn:router:0:0', tags: ['episode'] } });
+  const durable = (await call('GET', '/api/memory?view=durable')).json;
+  assert.deepEqual(durable.counts, { durable: 1, history: 1 });
+  assert.equal(durable.notes.length, 1);
+  assert.equal((await call('GET', '/api/memory?view=history&q=router')).json.notes[0].id, episode.json.id);
+  await call('DELETE', `/api/memory/${episode.json.id}`);
   const packet = await call('GET', '/api/memory/context?q=router&maxChars=400', { token: readToken });
   assert.equal(packet.status, 200);
   assert.match(packet.json.text, /garage/);

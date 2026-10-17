@@ -29,22 +29,25 @@ export function setupMedia({ h, api, stream, mediaView }) {
   const libraryCount = h('span', {class:'muted'});
   const more = h('button', {class:'ghost', hidden:true, onclick:()=>{visibleLimit+=12; renderGallery();}}, 'Show more');
   section.append(h('div', {class:'studio-heading'}, h('div', {}, h('span', {class:'eyebrow'}, 'HOMEAI STUDIO'), h('h2', {}, 'Bring your ideas to life'), h('p', {class:'muted'}, 'Make a film. Find a sound. Create right here on your PC.'))), form, h('div', { class: 'library-head' }, h('h2', {}, 'Your library'), libraryCount, h('span', {class:'spacer'}), filter, h('button', { class: 'ghost sm', onclick: () => loadGallery().catch(showError) }, 'Refresh library')), gallery, more);
-  let connectors = {}, runId = null;
+  let connectors = {}, routes = {}, runId = null;
   let libraryFiles = [], visibleLimit = 12, galleryVersion = 0;
   function showError(e) { status.textContent = e.message; status.classList.add('bad'); }
   function defaults() {
     const d = connectors[model.value]?.defaults ?? {};
     for (const [k, input] of Object.entries(fields)) input.value = d[k] ?? (k === 'seed' ? '' : ({ frames:49,width:640,height:352,steps:20,fps:24,cfg:5,seconds:30,bpm:110 })[k]);
-    modelNote.textContent = /UNTESTED/i.test(connectors[model.value]?.model ?? '') ? 'Experimental model: quality and runtime are not yet verified on this PC.' : 'Runs on your GPU. Larger clips take longer; start with the recommended settings.';
+    negative.value = d.negative ?? connectors[model.value]?.negative ?? '';
+    modelNote.textContent = connectors[model.value]?.note ?? (/UNTESTED/i.test(connectors[model.value]?.model ?? '') ? 'Experimental model: quality and runtime are not yet verified on this PC.' : 'Runs on your GPU. Larger clips take longer; start with the recommended settings.');
   }
   function models() {
     const old = model.value;
-    model.replaceChildren(...Object.entries(connectors).filter(([,c]) => c.kind === 'comfyui' && c.media === mode.value).map(([id,c]) => h('option', { value:id }, c.model.replace(/ \((?:tested|UNTESTED workflow)\)/g, '').replace('fp16 weights cast to fp8, tested','FP8 · recommended'))));
+    const chain = routes[mode.value === 'audio' ? 'music' : mode.value]?.chain ?? [];
+    const rank = id => chain.includes(id) ? chain.indexOf(id) : chain.length;
+    model.replaceChildren(...Object.entries(connectors).filter(([,c]) => c.kind === 'comfyui' && c.media === mode.value).sort(([a], [b]) => rank(a) - rank(b)).map(([id,c]) => h('option', { value:id }, c.model.replace(/ \((?:tested|UNTESTED workflow)\)/g, '').replace('fp16 weights cast to fp8, tested','FP8 · recommended'))));
     if ([...model.options].some(o => o.value === old)) model.value = old;
     const video = mode.value === 'video', image = mode.value === 'image';
-    for (const label of settings.children) label.hidden = !(['steps','seed', ...(video ? ['cfg','width','height','frames','fps'] : image ? ['width','height'] : ['cfg','seconds','bpm'])].includes(label.dataset.mediaSetting));
+    for (const label of settings.children) label.hidden = !(['steps','seed', ...(video ? ['cfg','width','height','frames','fps'] : image ? ['cfg','width','height'] : ['cfg','seconds','bpm'])].includes(label.dataset.mediaSetting));
     lyricsLabel.hidden = mode.value !== 'audio';
-    negLabel.hidden = !video;
+    negLabel.hidden = mode.value === 'audio';
     generate.disabled = !!runId || !model.value;
     defaults();
   }
@@ -167,7 +170,7 @@ export function setupMedia({ h, api, stream, mediaView }) {
     finally { if (!watching) { runId = null; setBusy(false); } }
   });
   return async () => {
-    const config = await api('/api/config'); connectors = config.connectors;
+    const config = await api('/api/config'); connectors = config.connectors; routes = config.routes;
     if (!runId && !watching) models();
     await Promise.all([loadGallery(), loadSession()]);
   };

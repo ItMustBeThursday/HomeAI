@@ -1,0 +1,15 @@
+{
+  "_note": "Free hosted tiers for the swarm. Limits are third-party reports (Oct 2026), UNVERIFIED against each provider dashboard; rpm/rpd are conservative pacing values. Providers stay disabled until their key env var is set. Free tiers may log or train on prompts, so only non-sensitive sub-tasks are ever sent.",
+  "providers": [
+    { "id": "openrouter", "baseUrl": "https://openrouter.ai/api/v1", "keyEnv": "HOMEAI_KEY_OPENROUTER", "rpm": 15, "rpd": 50, "maxTokens": 1024,
+      "models": ["nvidia/nemotron-3-super-120b-a12b:free", "google/gemma-4-31b-it:free", "google/gemma-4-26b-a4b-it:free"], "logsPrompts": true },
+    { "id": "groq", "baseUrl": "https://api.groq.com/openai/v1", "keyEnv": "HOMEAI_KEY_GROQ", "rpm": 25, "rpd": 1000, "maxTokens": 1024,
+      "models": ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b"] },
+    { "id": "nvidia", "baseUrl": "https://integrate.api.nvidia.com/v1", "keyEnv": "HOMEAI_KEY_NVIDIA", "rpm": 30, "rpd": 10000, "maxTokens": 1024,
+      "models": ["openai/gpt-oss-20b", "nvidia/nemotron-3-super-120b-a12b"], "note": "Needs NVIDIA Developer Program membership" },
+    { "id": "gemini", "baseUrl": "https://generativelanguage.googleapis.com/v1beta/openai", "keyEnv": "HOMEAI_KEY_GEMINI", "rpm": 5, "rpd": 100, "maxTokens": 1024,
+      "models": ["gemini-2.5-flash-lite"], "trainsOnPrompts": true, "note": "Google OpenAI-compat endpoint; free-tier prompts may improve products (non-EEA). Model names/limits unverified." },
+    { "id": "mistral", "baseUrl": "https://api.mistral.ai/v1", "keyEnv": "HOMEAI_KEY_MISTRAL", "rpm": 10, "rpd": 500, "maxTokens": 1024,
+      "models": ["mistral-small-latest"], "trainsOnPrompts": true, "note": "Experiment plan may train on prompts unless opted out" }
+  ]
+}

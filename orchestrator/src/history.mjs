@@ -244,9 +244,15 @@ export function createConversationStore(dir, { now = Date.now, newId = randomUUI
       }
       return null;
     },
-    create({ title = 'New chat', taskType, project } = {}) {
+    create({ title = 'New chat', taskType, project, memory } = {}) {
       const t = now();
-      return write({ id: newId(), title: clip(String(title), 80), taskType: taskType || undefined, project: project || undefined, created: t, updated: t, messages: [] });
+      return write({ id: newId(), title: clip(String(title), 80), taskType: taskType || undefined, project: project || undefined, ...(memory === false ? { memory: false } : {}), created: t, updated: t, messages: [] });
+    },
+    disableMemory(id) {
+      const conv = read(id);
+      if (!conv) throw new Error('Conversation not found');
+      conv.memory = false;
+      return write(conv);
     },
     append(id, ...messages) {
       const conv = read(id);

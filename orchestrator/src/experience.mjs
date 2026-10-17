@@ -1,5 +1,6 @@
 // Deterministic, local-only experience index. Original transcripts remain authoritative.
 // Each bounded excerpt keeps its role and source; assistant reports are never verified facts.
+import { excludedConversation } from './memory-policy.mjs';
 const SIZE = 360;
 export function redactMemory(text) {
   return String(text ?? '').replace(/\bBearer\s+\S+/gi, 'Bearer [redacted]')
@@ -21,15 +22,16 @@ function chunks(text) {
   return out;
 }
 function put(memory, fields, known) {
+  if (memory.isRetiredEpisode?.(fields.source)) return 0;
   fields = { ...fields, title: fields.title.trim(), text: fields.text.trim() };
   const old = known.get(fields.source);
   if (old?.text === fields.text && old?.title === fields.title) return 0;
-  memory.add(fields);
+  const saved = memory.add(fields);
   known.set(fields.source, fields);
-  return 1;
+  return saved?.duplicateOf ? 0 : 1; // a repeat of an excerpt already stored is not stored again
 }
 export function rememberConversation(memory, conv, { known = new Map(memory.list().map(n => [n.source, n])), from = 0 } = {}) {
-  if (!conv || conv.private) return 0;
+  if (!conv || conv.private || excludedConversation(conv)) return 0;
   let count = 0;
   for (let i = from; i < (conv.messages ?? []).length; i++) {
     const m = conv.messages[i];

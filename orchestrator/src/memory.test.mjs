@@ -135,3 +135,19 @@ _test('episode excerpts are labelled current or superseded for small models', ()
   _assert.match(out, /\[SUPERSEDED, do not use\][^\n]*0\.937/);
   _assert.match(out, /\[CURRENT\][^\n]*0\.941/);
 });
+
+import { sameEpisode } from './memory.mjs';
+test('repeated episode excerpts are stored once; distinct and non-episode notes are kept', () => {
+  const m = createMemoryStore(mkdtempSync(join(tmpdir(), 'mem-dup-')));
+  const ep = (text, source) => ({ title: 't', text, source, tags: ['chat', 'episode'], scope: 'chat', kind: 'open', pri: 0 });
+  const a = m.add(ep('User said: Keep the Discord guide short and friendly please', 'turn:a:0:0'));
+  const b = m.add(ep('User said: Keep the Discord guide short and friendly   please', 'turn:b:3:0'));
+  assert.equal(b.duplicateOf, a.id);
+  m.add(ep('User said: Do not keep the Discord guide short and friendly please at all today', 'turn:c:1:0'));
+  m.add({ title: 'k', text: 'Keep the Discord guide short and friendly please', tags: ['ws'], scope: 'ops', kind: 'fact' });
+  assert.equal(m.list().length, 3);
+  assert.equal(sameEpisode({ scope: 'x', text: 'a b c' }, { scope: 'y', text: 'a b c' }), false);
+  const d = m.add(ep('User said: Totally different words here for sure', 'turn:d:0:0'));
+  assert.ok(!d.duplicateOf);
+  assert.equal(m.dedupeEpisodes().length, 0);
+});

@@ -109,3 +109,14 @@ index in bounded batches of32 using the installed local embedding model. Run aft
 a verified memory-store backup before bulk maintenance. It logs counts and saves a coverage report without logging
 note text. Existing concurrent-edit guards remain active. Foreground retrieval continues indexing newly added notes
 incrementally; keyword search remains available if embedding fails. No transcript or note content is deleted.
+
+## Main memory bank (0.33.0)
+
+`D:/HomeAI/workspace/MEMORY.mcl` is the single owner-maintained bank. It replaces the prose STATE/RESUME/MEMORY/USER/SOUL notes
+(now pointer stubs; originals in `D:/HomeAI/backups/mcl-consolidation-20261017`). `syncWorkspace` parses it losslessly
+(no distillation) into the shared store with `ws:MEMORY.mcl:<hash>` sources: edited lines replace their old note, deleted
+lines are trashed (restorable in `data/memory/trash`), `^3` lines also get the `core` tag. Legacy `ws:RESUME.md:` etc.
+distills are trashed once. `AGENTS.md` is still distilled (conventions). Editing procedure: `D:/HomeAI/workspace/MEMORY-HOWTO.md`.
+Validate edits with `node scripts/memory-bank-check.mjs` (parse errors, duplicate identity, keyless facts, secret-like text,
+unescaped `;`, oversize records, core packet size). All routes, MCP clients and shell agents therefore read one source;
+derived `&turn:`/`&task:` excerpts stay unverified evidence and never override the bank.

@@ -25,6 +25,11 @@ const distinctNotes = (notes) => {
   const seen = new Set();
   return notes.filter(n => { const key = duplicateKey(n); if (seen.has(key)) return false; seen.add(key); return true; });
 };
+// Exact text only: word overlap erases negation, ordering, path case and speaker provenance.
+const normalizedText = text => String(text).replace(/\s+/g, ' ').trim();
+export const sameEpisode = (a, b) => {
+  return (a.scope ?? '') === (b.scope ?? '') && normalizedText(a.text) !== '' && normalizedText(a.text) === normalizedText(b.text);
+};
 // Small models often copy the first matching value. Label explicit status words from the source text so every model
 // sees the same cue. Labels are derived at render time only; stored notes are unchanged.
 const OLD_RE = /\b(?:obsolete|superseded|outdated|deprecated|no longer (?:current|valid|true))\b/i;
@@ -73,6 +78,10 @@ const textFor = (n) => `${n.title}\n${n.text}\n${n.tags.join(' ')}`;
 // embedder: { model: string, embed: async (texts[]) => number[][] }  (optional)
 export function createMemoryStore(dir, { now = Date.now, newId = randomUUID, embedder = null } = {}) {
   let sourceIndex;
+  let retiredEpisodeSources;
+  let episodeCache; // light copies (no vectors) of episode notes for the repeat check; add/update/remove keep it in step
+  const repeatable = (n) => n.tags.includes('episode') || /^conv:/.test(n.source ?? ''); // excerpts and conversation digests
+  const episodes = () => (episodeCache ??= all().filter(repeatable).map(({ id, scope, text, tags, source }) => ({ id, scope, text, tags, source })));
   const trash = join(dir, 'trash');
   mkdirSync(trash, { recursive: true });
   const file = (id) => {
@@ -101,7 +110,7 @@ export function createMemoryStore(dir, { now = Date.now, newId = randomUUID, emb
     renameSync(`${f}.tmp`, f);
     return n;
   };
-  const clean = ({ title, text, tags = [], source, kind, scope, pri, keyless }) => {
+  const clean = ({ title, text, tags = [], source, kind, scope, pri, keyless, date, refs }) => {
     if (typeof title !== 'string' || !title.trim()) throw new Error('title must be a non-empty string');
     if (typeof text !== 'string' || !text.trim()) throw new Error('text must be a non-empty string');
     if (!Array.isArray(tags) || tags.some((t) => typeof t !== 'string' || !t.trim())) throw new Error('tags must be an array of non-empty strings');
@@ -112,6 +121,14 @@ export function createMemoryStore(dir, { now = Date.now, newId = randomUUID, emb
     if (scope !== undefined) out.scope = clip(String(scope).trim(), 40);
     if (pri !== undefined) out.pri = pri;
     if (keyless) out.keyless = true;
+    if (date !== undefined) {
+      if (date !== '' && !/^\d{6}$/.test(date)) throw new Error('date must be YYMMDD');
+      out.date = date;
+    }
+    if (refs !== undefined) {
+      if (!Array.isArray(refs) || refs.some(r => typeof r !== 'string' || !r.trim())) throw new Error('refs must be non-empty strings');
+      out.refs = [...new Set(refs)];
+    }
     if (pri === 3 && !out.tags.includes('core')) out.tags.push('core');
     return out;
   };
@@ -152,7 +169,7 @@ export function createMemoryStore(dir, { now = Date.now, newId = randomUUID, emb
       .slice(0, limit);
     return [...core, ...rest];
   };
-  const toRecord = (n) => mcl.normalize({ scope: n.scope, kind: n.kind ?? 'fact', key: n.keyless ? '' : n.title, val: n.text, tags: n.tags.filter((t) => t !== 'core'), pri: n.tags.includes('core') ? 3 : (n.pri ?? 0), date: mcl.dateCode(n.updated ?? 0), refs: n.source ? [n.source] : [] });
+  const toRecord = (n) => mcl.normalize({ scope: n.scope, kind: n.kind ?? 'fact', key: n.keyless ? '' : n.title, val: n.text, tags: n.tags.filter((t) => t !== 'core'), pri: n.tags.includes('core') ? 3 : (n.pri ?? 0), date: n.date ?? mcl.dateCode(n.updated ?? 0), refs: [...(n.source ? [n.source] : []), ...(n.refs ?? [])] });
   const srcOf = (r) => `mcl:${r.scope}/${r.key ? r.key.toLowerCase() : mcl.shortHash(r)}`;
   // Fits more retrieved records into a small budget without touching stored notes: exact duplicates are dropped, then the
   // relevant records are shrunk to query-focused extracts at the largest per-record size where every one still fits.
@@ -195,6 +212,17 @@ ${tail}` : head || tail;
   };
 
   const store = {
+    // Deleting an indexed excerpt must survive a transcript backfill and restart.
+    isRetiredEpisode(source) {
+      if (!retiredEpisodeSources) {
+        retiredEpisodeSources = new Set();
+        for (const name of readdirSync(trash)) {
+          if (!name.endsWith('.json')) continue;
+          try { const n = JSON.parse(readFileSync(join(trash, name), 'utf8')); if (/^(turn|task|conv):/.test(n.source ?? '')) retiredEpisodeSources.add(n.source); } catch {}
+        }
+      }
+      return retiredEpisodeSources.has(source);
+    },
     list: () => all().map(publicNote),
     get: (id) => {
       const n = read(id);
@@ -206,8 +234,20 @@ ${tail}` : head || tail;
       sourceIndex ??= new Map(all().filter(n => n.source).map(n => [n.source, n.id]));
       const existing = c.source && sourceIndex.has(c.source) ? read(sourceIndex.get(c.source)) : null;
       if (existing) { const { vec, vmodel, ...rest } = existing; return publicNote(write({ ...rest, ...c, updated: now() })); } // vector is stale after an upsert
+      // A repeated excerpt (same words, other conversation/turn) is not stored again; the first copy is returned.
+      if (repeatable(c)) {
+        const twin = episodes().find((n) => sameEpisode(n, c));
+        if (twin) return { ...publicNote(twin), duplicateOf: twin.id };
+      } else if (!c.source?.startsWith('ws:')) {
+        // Manual/API retries must not create another durable copy. Bank identities
+        // are managed by bank sync; never alias their source IDs to another note.
+        const twin = all().find(n => !repeatable(n) && n.title === c.title && (n.kind ?? 'fact') === (c.kind ?? 'fact') &&
+          (n.scope ?? '') === (c.scope ?? '') && normalizedText(n.text) === normalizedText(c.text));
+        if (twin) return { ...publicNote(twin), duplicateOf: twin.id };
+      }
       const t = now();
       const note = write({ id: newId(), ...c, created: t, updated: t });
+      if (repeatable(c) && episodeCache) episodeCache.push({ id: note.id, scope: note.scope, text: note.text, tags: note.tags, source: note.source });
       if (c.source) sourceIndex.set(c.source, note.id);
       return publicNote(note);
     },
@@ -221,6 +261,7 @@ ${tail}` : head || tail;
         sourceIndex.delete(n.source);
         if (c.source) sourceIndex.set(c.source, id);
       }
+      episodeCache = undefined;
       const changed = c.title !== n.title || c.text !== n.text || c.tags.join() !== n.tags.join();
       return publicNote(write({ ...rest, ...c, updated: now(), ...(changed ? {} : { vec, vmodel }) }));
     },
@@ -228,6 +269,8 @@ ${tail}` : head || tail;
       const note = read(id);
       if (!note) throw new Error('Memory note not found');
       renameSync(file(id), join(trash, `${id}.json`));
+      if (episodeCache) episodeCache = episodeCache.filter((n) => n.id !== id);
+      if (retiredEpisodeSources && /^(turn|task|conv):/.test(note.source ?? '')) retiredEpisodeSources.add(note.source);
       sourceIndex?.delete(note.source);
     },
     search(query, limit = 5) {
@@ -257,6 +300,16 @@ ${tail}` : head || tail;
       if (!embedder) return 0;
       return indexMissing();
     },
+    // Retires repeated episode excerpts (oldest copy wins) into the restorable trash. Returns the retired ids.
+    dedupeEpisodes({ dryRun = false } = {}) {
+      const kept = [], retired = [];
+      for (const n of all().filter(repeatable).sort((a, b) => a.created - b.created)) {
+        const twin = kept.find((k) => sameEpisode(k, n));
+        if (twin) { retired.push({ id: n.id, source: n.source, keptId: twin.id }); if (!dryRun) store.remove(n.id); }
+        else kept.push({ id: n.id, scope: n.scope, text: n.text });
+      }
+      return retired;
+    },
     exists: () => existsSync(dir),
     // The whole memory as MCL text (alias-packed unless alias:false), plus size stats.
     exportMcl({ alias = true } = {}) {
@@ -275,7 +328,7 @@ ${tail}` : head || tail;
           continue;
         }
         const tags = r.pri >= 3 ? [...r.tags, 'core'] : r.tags;
-        const fields = { title: r.key || r.val.slice(0, 80), text: r.val || r.key, tags, source, kind: r.kind, scope: r.scope, pri: r.pri, keyless: !r.key };
+        const fields = { title: r.key || r.val.slice(0, 80), text: r.val || r.key, tags, source, kind: r.kind, scope: r.scope, pri: r.pri, keyless: !r.key, date: r.date, refs: r.refs };
         existing ? store.update(existing.id, fields) : store.add(fields);
         existing ? updated++ : added++;
       }

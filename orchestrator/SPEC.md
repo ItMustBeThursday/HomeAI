@@ -1,4 +1,4 @@
-# HomeAI Orchestrator — spec
+# HoopyFrood Orchestrator — spec
 
 Single local service that routes tasks to LLM connectors (claude-cli, codex-cli, ollama), tracks usage with informational counters. Later phases: Logan catalog, device API, MCP server, WebUI.
 
@@ -8,9 +8,8 @@ Single local service that routes tasks to LLM connectors (claude-cli, codex-cli,
 3. **Logan**: approved choice-menu catalog, device API, live menu reprogramming (switch presses stay deterministic).
 4. **MCP server**: lets Claude talk to the orchestrator directly.
 5. **WebUI**: browser UI served by the service — chat with route/model shown per reply, usage and budget dashboard, route/connector editor, Logan menu/catalog editor, job/history view. Static HTML/CSS/JS with no build step, talking only to the Phase 2 API.
-6. **Companion apps**: after everything above is working, update the existing HomeAI companion apps (`D:\HomeAI\projects\homeai-companion`: desktop, android, remote) to use the orchestrator API instead of OpenClaw.
+6. **Companion apps**: after everything above is working, update the existing HoopyFrood companion apps (`D:\HomeAI\projects\homeai-companion`: desktop, android, remote) to use the orchestrator API.
 
-Preserve OpenClaw until explicit cutover approval. Historical removal claims are not authorization.
 
 Status (2026-10-15): Phases 1, 2 and 5 (WebUI v1) done. Phase 3 next.
 

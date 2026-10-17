@@ -6,7 +6,7 @@
 //             { "id": { "name", "description", "testUrl", "auth": "bearer"|"token"|"<Header-Name>", "accountField" } }
 // Secrets never leave this module except through getSecret(), which only in-process code (e.g. the GitHub client) uses.
 const ID = /^[a-z][a-z0-9-]{0,30}$/;
-const GITHUB = { id: 'github', name: 'GitHub', description: 'Issues, pull requests and CI for the HomeAI repo; later, anything your login can reach.', builtin: true };
+const GITHUB = { id: 'github', name: 'GitHub', description: 'Issues, pull requests and CI for the HoopyFrood repo; later, anything your login can reach.', builtin: true };
 
 function headerFor(auth, secret) {
   if (auth === 'bearer' || !auth) return { authorization: `Bearer ${secret}` };

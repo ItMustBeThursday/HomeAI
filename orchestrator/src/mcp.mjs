@@ -153,7 +153,7 @@ export const TOOLS = {
     },
   },
   github: {
-    description: 'GitHub for the HomeAI repo: summary (latest commits, workflow runs), issues (open/closed/all), or runs.',
+    description: 'GitHub for the HoopyFrood repo: summary (latest commits, workflow runs), issues (open/closed/all), or runs.',
     schema: obj({ what: { type: 'string', enum: ['summary', 'issues', 'runs'] }, state: { type: 'string', enum: ['open', 'closed', 'all'] } }, ['what']),
     async run(a, api) {
       if (a.what === 'summary') return JSON.stringify(await api('GET', '/api/github'), null, 2);
@@ -162,7 +162,7 @@ export const TOOLS = {
     },
   },
   github_create_issue: {
-    description: 'Create an issue in the public HomeAI GitHub repo. This publishes text publicly; only use when the user asked for it.',
+    description: 'Create an issue in the public HoopyFrood GitHub repo. This publishes text publicly; only use when the user asked for it.',
     schema: obj({ title: str('Issue title'), body: str('Issue body') }, ['title']),
     async run(a, api) {
       const i = await api('POST', '/api/github/issues', { title: a.title, body: a.body });

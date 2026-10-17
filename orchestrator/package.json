@@ -1,9 +1,11 @@
 {
   "name": "homeai-orchestrator",
-  "version": "0.32.2",
+  "version": "0.34.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=24" },
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "test": "node --test"
   }

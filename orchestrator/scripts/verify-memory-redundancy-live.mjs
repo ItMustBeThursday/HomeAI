@@ -1,0 +1,11 @@
+import { readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+const backup=readFileSync('D:/HomeAI/state/memory-dedup-backup.txt','utf8').trim();
+const token=readFileSync('D:/HomeAI/projects/orchestrator/data/token.txt','utf8').trim();
+const get=async path=>{const r=await fetch(`http://127.0.0.1:18850${path}`,{headers:{authorization:`Bearer ${token}`},signal:AbortSignal.timeout(10000)});if(!r.ok)throw new Error(`Local verification HTTP ${r.status}`);return r;};
+const durable=await (await get('/api/memory?view=durable')).json();
+const history=await (await get('/api/memory?view=history')).json();
+const html=await (await get('/')).text(),js=await (await get('/app.js')).text();
+const checks={countsSupported:!!durable.counts,durableExcludesEpisodes:durable.notes.every(n=>!n.tags.includes('episode')&&!/^(turn|task|conv):/.test(n.source??'')),historyOnly:history.notes.every(n=>/^(turn|task|conv):/.test(n.source??'')),legacyConsolidated:durable.notes.every(n=>!/^(migrated|integration):/.test(n.source??'')),viewServed:html.includes('id="mem-view"')&&js.includes('counts.durable')};
+const result={ok:Object.values(checks).every(Boolean),checks,counts:durable.counts,time:new Date().toISOString()};
+writeFileSync(join(backup,'live-verification.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result,null,2));if(!result.ok)process.exitCode=1;

@@ -1,4 +1,4 @@
-/* HomeAI WebUI. Tokens first; themes switch via <html data-theme="light|dark|system">. */
+/* HoopyFrood WebUI. Tokens first; themes switch via <html data-theme="light|dark|system">. */
 :root {
   --bg: #f5f6f8; --surface: #ffffff; --surface-2: #f0f2f5; --raised: #ffffff;
   --text: #171b24; --muted: #667085; --faint: #98a2b3; --border: #e3e6ec; --border-strong: #cfd4dd;

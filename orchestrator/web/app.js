@@ -1,8 +1,10 @@
-// HomeAI Orchestrator WebUI. Plain ES module, no build step.
+import { toCanvas as pairingQR } from './pairing-qr.js';
+// HoopyFrood Orchestrator WebUI. Plain ES module, no build step.
 // Safety rule: model/user text is only ever inserted with textContent or createTextNode, never innerHTML.
 // (The only innerHTML use is the static icon table below.)
 import { setupMedia } from './media.js';
 import { setupPrivate } from './private.js';
+import { setupVoice } from './voice.js';
 import { createMediaRenderer, localMediaName } from './media-view.js';
 import { groupByCategory, modelTitle, modelDescription } from './model-catalog.js';
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -115,6 +117,22 @@ function ask(title, message, value = '') {
     f.select();
   });
 }
+const askInput = ask;
+function confirmAction(title, message, { ok = 'Confirm', danger = false } = {}) {
+  return new Promise((resolve) => {
+    const dlg = $('#confirm-dialog');
+    $('#confirm-title').textContent = title;
+    $('#confirm-msg').textContent = message ?? '';
+    const okBtn = $('#confirm-ok');
+    okBtn.textContent = ok;
+    okBtn.className = danger ? 'primary danger-solid' : 'primary';
+    dlg.addEventListener('close', () => resolve(dlg.returnValue === 'ok'), { once: true });
+    dlg.returnValue = '';
+    dlg.showModal();
+    (danger ? $('#confirm-cancel') : okBtn).focus();
+  });
+}
+$('#confirm-cancel').addEventListener('click', () => $('#confirm-dialog').close('cancel'));
 $('#input-cancel').addEventListener('click', () => $('#input-dialog').close('cancel'));
 async function copyText(text) {
   try {
@@ -338,7 +356,7 @@ const loaders = {};
 loaders.media = setupMedia({ h, api, stream, mediaView });
 loaders.private = setupPrivate({ h, api, stream, markdown, bootstrapToken, getToken: () => token });
 let current = 'chat';
-let baseTitle = 'HomeAI';
+let baseTitle = 'HoopyFrood';
 // Browser tab title shows background work and finished replies you have not opened yet.
 function paintTitle() {
   const working = typeof runs === 'undefined' ? 0 : runs.size;
@@ -352,7 +370,7 @@ function show(tab) {
   for (const s of $$('.tab')) s.classList.toggle('active', s.id === `tab-${tab}`);
   $('#page-title').textContent = TITLES[tab];
   $('#page-sub').textContent = SUBS[tab] ?? '';
-  baseTitle = `${TITLES[tab]} · HomeAI`;
+  baseTitle = `${TITLES[tab]} · HoopyFrood`;
   paintTitle();
   history.replaceState(null, '', `#${tab}`);
   $('#app').classList.remove('menu-open');
@@ -371,9 +389,11 @@ async function health() {
     const r = await fetch('/api/health').then((x) => x.json());
     el.className = 'health ok';
     el.textContent = `v${r.version} · online`;
+    $('#net-banner').hidden = true;
   } catch {
     el.className = 'health bad';
     el.textContent = 'offline';
+    $('#net-banner').hidden = false;
   }
 }
 
@@ -401,7 +421,27 @@ async function loadConfig() {
   pin.replaceChildren(h('option', { value: '' }, 'Automatic'), ...groupByCategory(Object.entries(config.connectors)).map(([cat, items]) => h('optgroup', { label: cat }, ...items.map(([name, c]) => h('option', { value: name, title: modelTitle(c) }, `${c.recommended ? '★ ' : ''}${c.label ? `${c.label} (${name})` : name}`)))));
   pin.value = prevPin && config.connectors[prevPin] ? prevPin : '';
   syncModels();
+  paintAvailability();
   return config;
+}
+// Model picker shows which models are down (from the cached service status), so nobody pins a dead one.
+let availability = null;
+function paintAvailability() {
+  if (!availability) return;
+  for (const o of $('#pin').options) {
+    if (!o.value) continue;
+    const base = o.dataset.base ?? (o.dataset.base = o.textContent);
+    const down = availability[o.value] === false;
+    o.textContent = down ? base + ' (unavailable)' : base;
+    o.classList.toggle('down', down);
+  }
+}
+async function refreshAvailability() {
+  try {
+    const st = await api('/api/status');
+    availability = Object.fromEntries(Object.entries(st.connectors ?? {}).map(([id, c]) => [id, !!c.ok]));
+    paintAvailability();
+  } catch { /* keep the last known state */ }
 }
 function syncModels() {
   if (!config) return;
@@ -799,7 +839,7 @@ function renderChats() {
     bulk.replaceChildren(h('b', {}, `${count} selected`), h('span', { class: 'spacer' }),
       st !== 'active' ? h('button', { class: 'sm', onclick: () => each((id) => `${base(id)}/restore`, 'POST', `Restored ${count}`) }, 'Restore') : null,
       st === 'active' ? h('button', { class: 'sm', onclick: () => each(base, 'DELETE', `Archived ${count}`) }, 'Archive') : null,
-      st !== 'trash' ? h('button', { class: 'sm danger', onclick: () => { if (confirm(`Delete ${count} chat${count > 1 ? 's' : ''}? They move to the trash and can be restored from there.`)) each((id) => `${base(id)}/trash`, 'POST', `Deleted ${count} (kept in trash)`); } }, 'Delete') : null,
+      st !== 'trash' ? h('button', { class: 'sm danger', onclick: async () => { if (await confirmAction(`Delete ${count} chat${count > 1 ? 's' : ''}?`, 'They move to the trash and can be restored from there.', { ok: 'Delete', danger: true })) each((id) => `${base(id)}/trash`, 'POST', `Deleted ${count} (kept in trash)`); } }, 'Delete') : null,
       h('button', { class: 'ghost sm', onclick: () => { chatsUi.selected.clear(); renderChats(); } }, 'Clear'));
   }
   $('#chats-note').textContent = st === 'trash' ? 'Deleted chats stay in data/conversations/trash until you remove them by hand. Restore brings one back.' : st === 'archived' ? 'Archived chats are kept in data/conversations/archive. Opening one restores it.' : '';
@@ -1052,6 +1092,7 @@ async function send(text, { approve = false } = {}) {
       msgs.push({ role: 'assistant', ...r.reply });
       thread.append(messageEl(msgs.at(-1), msgs.length - 1));
       scrollDown(true);
+      voice.onReply(r.reply.text);
     } else {
       unread.add(r.conversation.id);
       toast(`Reply ready in "${r.conversation.title}"`, 'ok', { label: 'Open', run: () => { show('chat'); openConversation(r.conversation.id); } });
@@ -1360,8 +1401,8 @@ async function loadJobs() {
     if (j.status === 'queued' || j.status === 'running') buttons.push(h('button', { class: 'ghost sm', onclick: act(j, 'cancel') }, 'Cancel'));
     if (['failed', 'cancelled', 'needs-input'].includes(j.status)) {
       const ask = j.status === 'needs-input';
-      buttons.push(h('button', { class: 'ghost sm', onclick: () => {
-        const g = ask ? window.prompt(`${j.question}\n\nYour answer or guidance:`) : '';
+      buttons.push(h('button', { class: 'ghost sm', onclick: async () => {
+        const g = ask ? await askInput('Your answer or guidance', j.question) : '';
         if (g === null) return;
         act(j, 'retry', { guidance: g || undefined })();
       } }, ask ? 'Answer' : 'Retry'));
@@ -1656,7 +1697,7 @@ $('#gh-create').addEventListener('click', async () => {
   const m = $('#gh-create-msg');
   const title = $('#gh-title').value.trim();
   if (!title) return;
-  if (!confirm(`Create a public GitHub issue titled "${title}"?`)) return;
+  if (!(await confirmAction('Create a public GitHub issue?', `Title: "${title}". Anyone can read it.`, { ok: 'Create issue' }))) return;
   m.className = 'msg';
   m.textContent = 'Creating…';
   try {
@@ -1685,14 +1726,15 @@ loaders.projects = async () => {
 let editing = null;
 async function loadMemory() {
   const q = $('#mem-search').value.trim();
-  const { notes } = await api(`/api/memory${q ? `?q=${encodeURIComponent(q)}` : ''}`);
+  const { notes, counts } = await api(`/api/memory?view=${$('#mem-view').value}${q ? `&q=${encodeURIComponent(q)}` : ''}`);
+  $('#mem-count').textContent = counts ? `${counts.durable} durable · ${counts.history} historical` : `${notes.length} notes`;
   $('#mem-list').replaceChildren(...(notes.length
     ? notes.map((x) => h('div', { class: 'note' },
       h('h4', {}, x.title), h('p', {}, x.text),
       h('div', { class: 'tags' }, x.tags.map((t) => h('span', { class: `pill ${t === 'core' ? 'ok' : ''}` }, t))),
       h('div', { class: 'acts' },
         h('button', { class: 'ghost sm', onclick: () => { editing = x.id; $('#mem-form-title').textContent = 'Edit note'; $('#mem-title').value = x.title; $('#mem-text').value = x.text; $('#mem-tags').value = x.tags.join(', '); $('#mem-cancel').hidden = false; $('#mem-title').focus(); } }, 'Edit'),
-        h('button', { class: 'ghost sm danger', onclick: async () => { if (!confirm(`Delete "${x.title}"? It moves to the memory trash.`)) return; await api(`/api/memory/${x.id}`, { method: 'DELETE' }); toast('Moved to trash', 'ok'); loadMemory(); } }, 'Delete'))))
+        h('button', { class: 'ghost sm danger', onclick: async () => { if (!(await confirmAction(`Delete "${x.title}"?`, 'It moves to the memory trash.', { ok: 'Delete', danger: true }))) return; await api(`/api/memory/${x.id}`, { method: 'DELETE' }); toast('Moved to trash', 'ok'); loadMemory(); } }, 'Delete'))))
     : [h('p', { class: 'muted' }, 'No notes.')]));
 }
 function resetMemForm() {
@@ -1703,6 +1745,7 @@ function resetMemForm() {
 }
 $('#mem-cancel').addEventListener('click', resetMemForm);
 $('#mem-refresh').addEventListener('click', loadMemory);
+$('#mem-view').addEventListener('change', loadMemory);
 $('#mem-search').addEventListener('input', () => loadMemory());
 $('#mem-form').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -1728,7 +1771,7 @@ async function loadDevices() {
   $('#dev-list').replaceChildren(devices.length
     ? h('table', {}, h('thead', {}, h('tr', {}, ['Device', 'Access', 'Created', 'Last seen', ''].map((t) => h('th', {}, t)))),
       h('tbody', {}, devices.map((d) => h('tr', {}, h('td', {}, h('strong', {}, d.name)), h('td', {}, d.scopes.map((s) => h('span', { class: 'pill' }, s))), h('td', {}, when(d.created)), h('td', {}, d.lastSeen ? when(d.lastSeen) : 'never'),
-        h('td', {}, h('button', { class: 'ghost sm danger', onclick: async () => { if (!confirm(`Revoke "${d.name}"? Its token stops working immediately.`)) return; await api(`/api/devices/${d.id}`, { method: 'DELETE' }); toast('Revoked', 'ok'); loadDevices(); } }, 'Revoke'))))))
+        h('td', {}, h('button', { class: 'ghost sm danger', onclick: async () => { if (!(await confirmAction(`Revoke "${d.name}"?`, 'Its token stops working immediately.', { ok: 'Revoke', danger: true }))) return; await api(`/api/devices/${d.id}`, { method: 'DELETE' }); toast('Revoked', 'ok'); loadDevices(); } }, 'Revoke'))))))
     : h('p', { class: 'muted' }, 'No extra devices yet.'));
 }
 $('#dev-form').addEventListener('submit', async (e) => {
@@ -1774,7 +1817,7 @@ function connCard(c) {
     h('p', { class: 'muted' }, c.description),
     h('div', { class: 'row' }, field, h('button', { class: 'primary', onclick: save }, c.connected ? 'Replace token' : 'Connect'),
       c.deviceFlow ? h('button', { class: 'ghost', onclick: () => startDeviceLogin(device, msg) }, 'Sign in with GitHub') : null,
-      c.connected || c.needsLogin ? h('button', { class: 'ghost danger', onclick: async () => { if (confirm(`Disconnect ${c.name}? The saved login is deleted from this PC.`)) done(() => api(`/api/connections/${encodeURIComponent(c.id)}`, { method: 'DELETE' }), `${c.name} disconnected`); } }, 'Disconnect') : null,
+      c.connected || c.needsLogin ? h('button', { class: 'ghost danger', onclick: async () => { if (await confirmAction(`Disconnect ${c.name}?`, 'The saved login is deleted from this PC.', { ok: 'Disconnect', danger: true })) done(() => api(`/api/connections/${encodeURIComponent(c.id)}`, { method: 'DELETE' }), `${c.name} disconnected`); } }, 'Disconnect') : null,
       msg),
     device);
 }
@@ -2003,6 +2046,7 @@ function paletteCommands(q) {
   items.push({ group: 'Go to', label: 'Settings', hint: SUBS.settings, run: () => show('settings') });
   if (whoami?.scopes.includes('admin')) items.push({ group: 'Actions', label: 'Open admin panel', hint: '', run: openAdmin });
   items.push(
+    { group: 'Actions', label: 'Keyboard shortcuts', hint: '?', run: () => $('#shortcuts-dialog').showModal() },
     { group: 'Actions', label: 'New chat', hint: 'Ctrl+Shift+O', run: () => { show('chat'); openConversation(null); } },
     { group: 'Actions', label: 'Toggle sidebar', hint: 'Ctrl+B', run: toggleSidebar },
     { group: 'Actions', label: 'Reset sidebar width', hint: '', run: () => { ui.sideW = 0; applySideWidth(); saveUi(); } },
@@ -2053,8 +2097,14 @@ $('#palette-input').addEventListener('keydown', (e) => {
 $('#palette').addEventListener('click', (e) => { if (e.target === $('#palette')) $('#palette').close(); });
 
 // ---- Global shortcuts ----
+$('#shortcuts-close').addEventListener('click', () => $('#shortcuts-dialog').close());
+$('#shortcuts-dialog').addEventListener('click', (e) => { if (e.target === $('#shortcuts-dialog')) $('#shortcuts-dialog').close(); });
+window.addEventListener('online', health);
+window.addEventListener('offline', health);
 document.addEventListener('keydown', (e) => {
   const mod = e.ctrlKey || e.metaKey;
+  const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName) || document.activeElement?.isContentEditable;
+  if (e.key === '?' && !mod && !typing && !document.querySelector('dialog[open]')) { e.preventDefault(); $('#shortcuts-dialog').showModal(); return; }
   if (mod && e.key.toLowerCase() === 'k') { e.preventDefault(); openPalette(); }
   else if (mod && e.key.toLowerCase() === 'b') { e.preventDefault(); toggleSidebar(); }
   else if (mod && e.shiftKey && e.key.toLowerCase() === 'o') { e.preventDefault(); show('chat'); openConversation(null); }
@@ -2065,19 +2115,29 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
+// ---- Voice ----
+const voice = setupVoice({ h, getToken: () => token, bootstrapToken, toast, sendText: (t) => send(t), isBusy: () => !!(chatLoading || reattachRunId || runHere()) });
+
 // ---- Boot ----
 buildNav();
 paintIcons();
 applyUi();
 health();
 setInterval(health, 30_000);
+setInterval(refreshAvailability, 60_000);
 (async () => {
   await bootstrapToken();
   whoami = await api('/api/whoami').catch(() => null);
   await loadConfig().catch(() => {});
+  refreshAvailability();
   applyFeatures();
   const start = location.hash.slice(1);
   show(TITLES[start] ? start : 'chat');
   const lastChat = localStorage.getItem('homeai-last-conversation');
   if ((!start || start === 'chat') && lastChat) await openConversation(lastChat).catch(() => toast('Your last chat is saved. Reopen it when the service reconnects.', 'bad'));
 })();
+
+let pairExpiry;
+function clearPair(){clearTimeout(pairExpiry);$('#pair-info').textContent='';$('#pair-link').textContent='';$('#pair-qr').hidden=true;$('#pair-qr').getContext('2d').clearRect(0,0,512,512);}
+$('#pair-start').onclick=async()=>{clearPair();try{const p=await api('/api/pair/start',{method:'POST',body:{}});$('#pair-info').textContent=`Code: ${p.code} · expires ${new Date(p.expiresAt).toLocaleTimeString()}`;$('#pair-link').textContent=p.url||'Enable the LAN address to use QR pairing.';if(p.url){await pairingQR($('#pair-qr'),p.url,{width:240,margin:4});$('#pair-qr').hidden=false;}pairExpiry=setTimeout(clearPair,Math.max(0,p.expiresAt-Date.now()));}catch(e){$('#pair-info').textContent=e.message;}};
+$('#pair-cancel').onclick=async()=>{clearPair();try{await api('/api/pair/cancel',{method:'POST',body:{}});}catch(e){$('#pair-info').textContent=e.message;}};

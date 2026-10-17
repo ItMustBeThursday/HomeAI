@@ -7,7 +7,7 @@ const tree = {
   'C:\\': ['Windows', 'Users', 'Recovery', '$Recycle.Bin', 'OneDriveTemp', 'Program Files'],
   'C:\\Users': ['adamc', 'Public'],
   'C:\\Users\\adamc': ['AppData', 'OneDrive - Corp', 'Desktop'],
-  'D:\\': ['HomeAI'],
+  'D:\\': ['HoopyFrood'],
 };
 const blocked = ['C:\\Users\\adamc\\OneDrive - Corp'];
 const check = (p) => checkFolder(p, { blocked, exists: () => true });

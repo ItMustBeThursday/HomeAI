@@ -1,0 +1,23 @@
+# Local voice
+
+The WebUI has **Mic** (dictate into the composer), **Talk** (listen/send/read replies/listen again), **Audio file** (transcribe into the composer), **Voice** (voice selection, reply readout, sample recording/upload and cloning), and **Quiet** (stop listening/playback).
+
+Open HoopyFrood on localhost or HTTPS to use the microphone. Browser microphone permission and an interaction allowing audio playback are required. Hands-free mode ends on Quiet, a second Talk click, or a recognized standalone "stop", "stop listening", "goodbye", or "that's all". Audio file transcription supports up to 25 MB and two minutes; it does not submit the recognized words until you send them. Microphone recognition is speech transcription, not general sound-event understanding.
+
+Speech runs on this PC: faster-whisper small/int8 on CPU, Kokoro ONNX for built-in voices, Chatterbox 0.1.7 for sample-conditioned cloning. No paid API is configured. Hub access/telemetry is disabled in the service and Whisper requires cached files. Transcribed words are sent to the selected chat route; choose a local model for an entirely local conversation. Audio is not stored by STT. Voice samples persist in `D:/HomeAI/data/voices`; replacements/removals retain SHA-256-verified copies in `D:/HomeAI/trash/voices`.
+
+Default voice is `af_heart`. Use Voice -> Test voice to audition. Speed adjusts built-in speech. For cloning, name the sample and record/upload 10–30 seconds of clean speech you have permission to use. The clone is available as `clone:name`. The bundled `selftest` and `acceptance-*` samples are synthetic test voices, not Adam's voice.
+
+Voice and cloning are now **two separate local services**: `projects/voice/voice_server.py` (127.0.0.1:18870, Whisper STT + Kokoro; also the only endpoint the orchestrator talks to) and `projects/voice/clone_server.py` (127.0.0.1:18871, Chatterbox cloning and sample storage). The voice service forwards `/clone/*` and `clone:` TTS to the clone service; if cloning is down, STT and built-in voices still work and clone calls return 503. `Start-Clone.ps1` starts cloning alone; `Start-Voice.ps1` starts both. Shared helpers: `voice_common.py`. Tests: `test_voice_server.py`, `test_clone_server.py` (8 pass). Split verified 2026-10-17 via real HTTP (built-in TTS 0.52s, STT round trip correct, clone 30.9s then STT correct); evidence in `evaluations/voice-split`. Pre-split backup: `backups/voice-split-20261017-src`.
+
+The voice service binds only to `127.0.0.1:18870`. Installed environment: `D:/HomeAI/runtime/voice-venv`. `D:/HomeAI/scripts/Start-Voice.ps1` checks process identity/health and starts it hidden; `HomeAI-Voice-Autostart` starts it at logon. This task does not guarantee crash supervision. The main orchestrator proxies authenticated `/api/voice/*` requests; its backend must load the new source via the normal idle restart. Never terminate an active job to deploy.
+
+## Observed acceptance, 2026-10-16
+
+- Real service + current Node HTTP adapter: authentication, 54 built-in voices, valid natural WAV, speech roundtrip, synthetic reference upload, valid cloned WAV, cloned speech recognition, responsive health during synthesis, invalid-audio response all passed. Report: `D:/HomeAI/evaluations/voice-1792205350660/report.json`.
+- Kokoro generated 8.28 seconds in 1.061 seconds; Whisper transcribed it in 1.4 seconds. Chatterbox generated 3.22 seconds in 27.595 seconds (includes cold model loading), recognized correctly. CPU cloning is slower than realtime; use built-in voices for conversation. Speaker similarity and subjective naturalness have not been evaluated by a human.
+- Python regression tests: 5 passed, including verified restoration of replaced/removed samples. Full orchestrator suite: 352 passed; log `D:/HomeAI/logs/voice-finish-tests-20261016.log`.
+- Edge isolated preview of new backend: enabled Mic/Talk/Audio file, voice catalog and cloning dialog observed. Test voice clicked without a reported page error. Physical microphone capture and speaker audibility unverified. Browser upload blocked by extension's file-URL permission; permission was not broadened. Real HTTP audio upload/transcription passed.
+- Production backend still returned Unknown endpoint during this job. Existing job/queue idle watcher PID23140 is waiting to restart using the established host script. Production deployment remains unverified until `/api/voice/status` succeeds. Preview is isolated and never runs a real LLM or touches live conversations.
+
+Source projects: [faster-whisper](https://github.com/SYSTRAN/faster-whisper), [Kokoro ONNX](https://github.com/thewh1teagle/kokoro-onnx), [Chatterbox](https://github.com/resemble-ai/chatterbox).

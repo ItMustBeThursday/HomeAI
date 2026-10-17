@@ -5,11 +5,17 @@ import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import * as mcl from './mcl.mjs';
 import { tele, gist } from './squeeze.mjs';
+import { excludedConversation } from './memory-policy.mjs';
 
+// MEMORY.mcl is the single main memory bank: parsed losslessly (no distillation). The prose files below are legacy inputs
+// that are only distilled when named explicitly; DEFAULT_NAMES is what the live service syncs.
+export const BANK = 'MEMORY.mcl';
+export const DEFAULT_NAMES = [BANK];
+export const LEGACY_NAMES = ['RESUME.md', 'STATE.md', 'USER.md', 'SOUL.md', 'MEMORY.md', 'IDENTITY.md', 'AGENTS.md'];
 const SCOPES = { 'RESUME.md': 'project', 'USER.md': 'user', 'SOUL.md': 'soul', 'AGENTS.md': 'agents', 'MEMORY.md': 'notes', 'IDENTITY.md': 'identity' };
 const LEGEND_KIND = { '!': 'rule', x: 'done', '+': 'done', o: 'open', '?': 'open', '~': 'pref' };
 // Only safety-critical rules become always-included (core) records; other rules rank by relevance like facts.
-const HARD = /one-?drive|secret|explicit approval|without approval|backup|openclaw|publish|purchase|external communication/i;
+const HARD = /one-?drive|secret|explicit approval|without approval|backup|publish|purchase|external communication/i;
 const RULEISH = /\b(always|never|must|require[sd]?|only|prefer)\b/i;
 const MAX_VAL = 320;
 
@@ -60,37 +66,60 @@ const clean = (s) => String(s ?? '').replace(/\s+/g, ' ').trim();
 
 // A conversation as one durable record any model can find later by topic. Null when there is no answered exchange yet.
 export function conversationFields(conv) {
+  if (excludedConversation(conv)) return null;
   const msgs = conv.messages ?? [];
   const users = msgs.filter((m) => m.role === 'user' && m.text);
   const bots = msgs.filter((m) => m.role === 'assistant' && m.text && !m.error);
   if (!users.length || !bots.length) return null;
   const title = clean(conv.title || users[0].text).slice(0, 60);
   const lastAsk = users.length > 1 ? ` | latest ask: ${gist(users.at(-1).text, 120)}` : '';
-  const val = tele(`asked: ${gist(users[0].text, 140)}${lastAsk} | outcome: ${gist(bots.at(-1).text, 220)} | ${users.length} turns${conv.project ? `, project ${conv.project}` : ''}`);
+  // A pasted guide/system prompt as the first message (e.g. the Discord channel rules) is boilerplate: show its tail, where the real request is.
+  const first = users[0].text.length > 400 ? `…${clean(users[0].text).slice(-140)}` : gist(users[0].text, 140);
+  const val = tele(`asked: ${first}${lastAsk} | outcome: ${gist(bots.at(-1).text, 220)} | ${users.length} turns${conv.project ? `, project ${conv.project}` : ''}`);
   return { title, text: `Model-reported, unverified: ${val}`.slice(0, 700), tags: ['chat'], source: `conv:${conv.id}`, kind: 'open', scope: 'chat', pri: 0 };
 }
 
 // Brings memory in line with the workspace notes. The state file remembers each file's content hash, so unchanged files cost nothing.
-export function syncWorkspace(memory, { dir, names = Object.keys(SCOPES), stateFile, readText = (p) => readFileSync(p, 'utf8') }) {
+// Records of a MEMORY.mcl bank, exactly as written (retire tombstones are dropped: removing a line retires its note).
+export function bankRecords(text) {
+  const { records, errors } = mcl.parse(text);
+  return { records: mcl.merge([], records).map((r) => ({ ...r, val: r.val || r.key })), errors };
+}
+
+export function syncWorkspace(memory, { dir, names = DEFAULT_NAMES, retireNames = LEGACY_NAMES, stateFile, readText = (p) => readFileSync(p, 'utf8') }) {
   let state = {};
   try { state = JSON.parse(readFileSync(stateFile, 'utf8')); } catch { /* first run */ }
   const stats = { files: 0, added: 0, removed: 0, skipped: 0 };
+  // Validate the complete bank before touching any stored notes, including legacy retirement.
+  // An interrupted/invalid edit must not erase the last usable shared context.
+  const bankText = names.includes(BANK) ? readText(`${dir}/${BANK}`) : null;
+  if (bankText !== null) {
+    const { records, errors } = bankRecords(bankText);
+    if (errors.length || !records.length) throw new Error('Memory bank invalid or empty; previous shared memory preserved');
+  }
   const own = (n) => /^(ws|conv):/.test(String(n.source ?? ''));
   const curated = memory.list().filter((n) => !own(n));
+  // Legacy prose distills (ws:RESUME.md:...) are superseded by the bank; trash them once (restorable in memory/trash).
+  for (const legacy of retireNames) {
+    if (names.includes(legacy)) continue;
+    for (const n of memory.list().filter((x) => String(x.source ?? '').startsWith(`ws:${legacy}:`))) { memory.remove(n.id); stats.removed++; }
+  }
   const seenGlobal = new Set();
   const accepted = [];
   for (const name of names) {
     const p = `${dir}/${name}`;
     if (!existsSync(p)) continue;
-    const text = readText(p);
-    const hash = sha(`distill-v2\n${text}`);
+    const text = name === BANK && bankText !== null ? bankText : readText(p);
+    const isBank = name.endsWith('.mcl');
+    const hash = sha(`${isBank ? 'bank-v2' : 'distill-v2'}\n${text}`);
     const prefix = `ws:${name}:`;
-    const records = distill(name, text);
+    const records = isBank ? bankRecords(text).records : distill(name, text);
     if (state[name] === hash) { stats.skipped++; records.forEach((r) => { seenGlobal.add(r.val.toLowerCase()); accepted.push(r.val); }); continue; }
     stats.files++;
     const wanted = new Map();
     for (const r of records) {
       const id = r.val.toLowerCase();
+      if (isBank) { wanted.set(`${prefix}${sha(mcl.serialize([r])).slice(0, 10)}`, r); continue; }
       if (seenGlobal.has(id)) continue; // same sentence already taken from another file
       seenGlobal.add(id);
       // Approximate deduplication can erase a correction ("unverified" vs "verified").
@@ -105,7 +134,7 @@ export function syncWorkspace(memory, { dir, names = Object.keys(SCOPES), stateF
     const have = new Set(existing.map((n) => n.source));
     for (const [source, r] of wanted) {
       if (have.has(source)) continue;
-      memory.add({ title: r.key || r.val.slice(0, 80), text: r.val, tags: r.pri >= 3 ? ['core', 'ws'] : ['ws'], source, kind: r.kind, scope: r.scope, pri: r.pri, keyless: !r.key });
+      memory.add({ title: r.key || r.val.slice(0, 80), text: r.val, tags: [...(r.pri >= 3 ? ['core', 'ws'] : ['ws']), ...(r.tags ?? [])], source, kind: r.kind, scope: r.scope, pri: r.pri, keyless: !r.key, ...(isBank ? { date: r.date, refs: r.refs } : {}) });
       stats.added++;
     }
     state[name] = hash;

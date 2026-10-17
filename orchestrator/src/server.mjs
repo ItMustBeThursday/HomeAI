@@ -1,5 +1,6 @@
 // HTTP API plus the WebUI's static files. Binds to loopback unless network access is switched on (see config/network.json).
 import { createServer } from 'node:http';
+import { isIP } from 'node:net';
 import { readFile } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import { join, normalize, extname, sep } from 'node:path';
@@ -10,6 +11,8 @@ import { mediaIntent } from './media-intent.mjs';
 import { checkMediaParams, MEDIA_FILE } from './connectors/comfy.mjs';
 import { readdirSync, statSync } from 'node:fs';
 import { basename as baseName } from 'node:path';
+import { createVoice } from './voice.mjs';
+import { isHistoryNote } from './memory-policy.mjs';
 
 const MEDIA_TYPES = { mp4: 'video/mp4', webm: 'video/webm', mp3: 'audio/mpeg', wav: 'audio/wav', flac: 'audio/flac', png: 'image/png', jpg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif' };
 
@@ -48,6 +51,17 @@ async function readJson(req, max = MAX_BODY) {
   } catch {
     throw new HttpError(400, 'Body is not valid JSON object');
   }
+}
+
+async function readRaw(req, max) {
+  let size = 0;
+  const chunks = [];
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > max) throw new HttpError(413, 'Audio too large');
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks);
 }
 
 // Input/validation errors from the orchestrator become 400s; "not found" becomes 404.
@@ -96,7 +110,7 @@ export function hostAllowed(host, network = {}) {
   const name = String(host ?? '').replace(/:\d+$/, '').toLowerCase();
   if ((network.allowedHosts ?? []).some((h) => h.toLowerCase() === name)) return true;
   // An IP literal can't be a DNS-rebinding name, so private-range IPs are safe to accept once LAN access is on.
-  return !!network.allowPrivateIPs && PRIVATE_IPV4.test(name);
+  return !!network.allowPrivateIPs && isIP(name) === 4 && PRIVATE_IPV4.test(name);
 }
 
 const OPEN = { id: 'open', name: 'open', scopes: new Set(SCOPES) };
@@ -111,7 +125,7 @@ export function isRemote(req) {
 
 // saveConfig(kind, obj) persists an edit ('routes' | 'budgets'); status(config, opts) checks connector health.
 // auth: createAuth(...) from access.mjs (scoped tokens). token: legacy single bearer token (tests). Neither: open.
-export function createApp({ orchestrator, conversations, scheduler, jobs, grants, saveConfig, status, auth, token, attachments, memory, privateSessions, shell, terminals, github, connections, network = {}, webDir, mediaDir, version = '0.0.0', now = Date.now, tokenFile }) {
+export function createApp({ orchestrator, conversations, scheduler, jobs, grants, saveConfig, status, auth, token, attachments, memory, privateSessions, shell, terminals, github, connections, pairing, lanAddresses = () => [], serverName = 'HoopyFrood', network = {}, webDir, mediaDir, version = '0.0.0', now = Date.now, tokenFile, voice = createVoice() }) {
   const identify = auth
     ? (h) => auth.identify(h)
     : token
@@ -175,12 +189,53 @@ export function createApp({ orchestrator, conversations, scheduler, jobs, grants
 
   // ---- public-ish ----
   add('GET', '/api/health', null, () => ({ ok: true, version }));
+  // ---- LAN discovery and pairing ----
+  // discover is deliberately tiny: a phone on the same network uses it to confirm "this is a HoopyFrood orchestrator".
+  add('GET', '/api/discover', null, () => ({ service: 'homeai-orchestrator', name: serverName, version, pairing: !!pairing?.pending() }));
+  add('POST', '/api/pair/start', 'admin', (c) => {
+    if (!pairing) throw new HttpError(501, 'Pairing is not enabled');
+    if (isRemote(c.req)) throw new HttpError(403, 'Pairing can only be started on this PC');
+    const p = pairing.start();
+    const addresses = lanAddresses();
+    const port = Number((c.req.headers.host ?? '').split(':')[1]) || undefined;
+    const first = addresses[0];
+    return { ...p, addresses, port, url: first ? `homeai://pair?host=${first}&port=${port ?? ''}&code=${p.code}` : undefined };
+  });
+  add('POST', '/api/pair/cancel', 'admin', () => (pairing?.cancel(), { ok: true }));
+  add('POST', '/api/pair/claim', null, async (c) => {
+    if (!pairing) throw new HttpError(501, 'Pairing is not enabled');
+    const body = await readJson(c.req);
+    try {
+      const r = pairing.claim(String(body.code ?? ''), body.name);
+      return { ok: true, token: r.token, device: r.device, server: { name: serverName, version } };
+    } catch (err) {
+      throw new HttpError(err.status ?? 400, err.message);
+    }
+  });
   add('GET', '/api/whoami', 'any', (c) => ({ id: c.identity.id, name: c.identity.name, scopes: [...c.identity.scopes] }));
+
+  // ---- voice (local STT / TTS / cloning) ----
+  const voiceCall = async (fn) => { try { return await fn(); } catch (err) { throw new HttpError(err.status ?? 502, err.message); } };
+  add('GET', '/api/voice/status', 'read', async () => {
+    try { return { available: true, ...(await voice.status()) }; } catch (err) { return { available: false, error: err.message }; }
+  });
+  add('GET', '/api/voice/voices', 'read', (c) => voiceCall(() => voice.voices()));
+  add('POST', '/api/voice/stt', 'chat', async (c) => voiceCall(async () => voice.stt(await readRaw(c.req, 25_000_000), c.url.searchParams.get('lang'))));
+  add('POST', '/api/voice/clone/:name', 'chat', async (c) => voiceCall(async () => voice.clone(c.params.name, await readRaw(c.req, 25_000_000))));
+  add('DELETE', '/api/voice/clone/:name', 'chat', (c) => voiceCall(() => voice.remove(c.params.name)));
+  add('POST', '/api/voice/tts', 'chat', async (c) => {
+    const body = await readJson(c.req);
+    const audio = await voiceCall(() => voice.tts({ text: String(body.text ?? ''), voice: body.voice ? String(body.voice) : undefined, speed: body.speed, expressiveness: body.expressiveness }));
+    c.streamed = true;
+    c.res.writeHead(200, { 'content-type': 'audio/wav', 'content-length': audio.length, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
+    c.res.end(audio);
+    return undefined;
+  });
 
   // ---- read ----
   add('GET', '/api/config', 'read', () => {
     const { connectors, routes: r, default: def, auto } = orchestrator.config;
-    return { connectors, routes: r, default: def, auto, caps: orchestrator.caps, editable: !!saveConfig, features: { usageReset: true, private: !!privateSessions, shell: !!shell, terminals: !!terminals, memory: !!memory, github: !!github, images: !!attachments, devices: !!auth, connections: !!connections, scheduler: !!scheduler, jobs: !!jobs, access: !!grants } };
+    return { connectors, routes: r, default: def, auto, caps: orchestrator.caps, editable: !!saveConfig, features: { usageReset: true, private: !!privateSessions, shell: !!shell, terminals: !!terminals, memory: !!memory, github: !!github, images: !!attachments, devices: !!auth, connections: !!connections, voice: !!voice, scheduler: !!scheduler, jobs: !!jobs, access: !!grants } };
   });
   add('GET', '/api/usage', 'read', (c) => {
     const hours = Number(c.url.searchParams.get('hours') ?? 24);
@@ -205,7 +260,10 @@ export function createApp({ orchestrator, conversations, scheduler, jobs, grants
   add('GET', '/api/memory', 'read', (c) => {
     const m = need(memory, 'Memory');
     const q = c.url.searchParams.get('q');
-    return { notes: q ? m.search(q, 20) : m.list() };
+    const all = m.list(), view = c.url.searchParams.get('view') ?? 'all';
+    const matchesView = n => view === 'durable' ? !isHistoryNote(n) : view === 'history' ? isHistoryNote(n) : true;
+    return { notes: (q ? m.search(q, all.length) : all).filter(matchesView).slice(0, q ? 20 : all.length),
+      counts: { durable: all.filter(n => !isHistoryNote(n)).length, history: all.filter(isHistoryNote).length } };
   });
   add('GET', '/api/memory/mcl', 'read', (c) => {
     const m = need(memory, 'Memory');
@@ -319,7 +377,7 @@ export function createApp({ orchestrator, conversations, scheduler, jobs, grants
       const { images, cwd, project } = early ?? prepare(c, body, auto.route, conv?.project);
       const reply = await orchestrator.chat({
         conversationId: body.conversationId, prompt: approval && pendingAuto ? undefined : body.prompt, taskType: auto ? undefined : body.taskType, connector: body.connector,
-        images, cwd, project, params, runId:body.runId, approve: !!approval, auto: approval ? undefined : auto ?? undefined, ...extra,
+        images, cwd, project, params, memory: body.memory, runId:body.runId, approve: !!approval, auto: approval ? undefined : auto ?? undefined, ...extra,
       });
       return pendingAuto ? { ...reply, reply: { ...reply.reply, auto: { via: pendingAuto.via, reason: pendingAuto.reason, ms: 0 } } } : reply;
     }), { detach: true });
@@ -582,12 +640,30 @@ export function createApp({ orchestrator, conversations, scheduler, jobs, grants
   };
 }
 
-export function startServer(options, { port, host = '127.0.0.1' }) {
-  const server = createServer(createApp(options));
-  // Model calls can take minutes; don't let Node's request timeout cut them off.
-  server.requestTimeout = 0;
+// extraHosts: more addresses to listen on with the same handler (the PC's LAN address when network.lan is on).
+// Binding to specific addresses, never 0.0.0.0, keeps the service off interfaces we did not choose.
+export function startServer(options, { port, host = '127.0.0.1', extraHosts = [] }) {
+  const handler = createApp(options);
+  const make = () => {
+    const srv = createServer(handler);
+    // Model calls can take minutes; don't let Node's request timeout cut them off.
+    srv.requestTimeout = 0;
+    return srv;
+  };
+  const server = make();
   return new Promise((resolve, reject) => {
     server.once('error', reject);
-    server.listen(port, host, () => resolve(server));
+    server.listen(port, host, async () => {
+      const extras = [];
+      for (const h of extraHosts.filter((x) => x && x !== host)) {
+        const srv = make();
+        // A busy or vanished LAN address must not take the loopback service down.
+        const ok = await new Promise((r) => { srv.once('error', () => r(false)); srv.listen(port, h, () => r(true)); });
+        if (ok) extras.push(srv);
+      }
+      server.extras = extras;
+      server.on('close', () => extras.forEach((e) => e.close()));
+      resolve(server);
+    });
   });
 }

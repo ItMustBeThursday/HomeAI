@@ -1,4 +1,4 @@
-# HomeAI Orchestrator
+# HoopyFrood Orchestrator
 
 A local Node.js 24 service for model routing, persistent chat and memory, coding jobs, media generation and a browser interface. It uses Node built-ins with no npm dependencies. Local inference runs through Ollama and ComfyUI; Claude and Codex use their standalone subscription CLIs.
 
@@ -34,9 +34,8 @@ The root `Sync-Orchestrator.ps1 -Message "summary"` tests, scans source, verifie
 
 ## Remaining work
 
-- Companion desktop/Android/remote clients still use the legacy gateway protocol; migration is incomplete.
+- Companion desktop/Android/remote clients are being rebuilt on the orchestrator API with a LAN pairing mode.
 - Logan needs the approved catalog and actual device/service facts. Live switch behavior stays deterministic.
 - Browser refresh/reattached Stop, media continuity and crash recovery retain the acceptance gaps recorded in their plans.
-- Preserve OpenClaw until explicit cutover approval. Historical removal claims do not establish current authorization. This review neither starts nor stops it.
 
-See [SPEC.md](SPEC.md), [MIGRATION.md](MIGRATION.md), [MODEL-CATALOG.md](MODEL-CATALOG.md) and [INTEGRATIONS.md](INTEGRATIONS.md).
+See [SPEC.md](SPEC.md), [MODEL-CATALOG.md](MODEL-CATALOG.md) and [INTEGRATIONS.md](INTEGRATIONS.md).

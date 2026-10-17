@@ -1,6 +1,14 @@
 {
   "host": "127.0.0.1",
-  "allowedHosts": [],
+  "allowedHosts": [
+    "192.168.1.162"
+  ],
   "allowPrivateIPs": false,
-  "remoteAdmin": false
+  "remoteAdmin": false,
+  "lan": {
+    "enabled": true,
+    "addresses": [
+      "192.168.1.162"
+    ]
+  }
 }

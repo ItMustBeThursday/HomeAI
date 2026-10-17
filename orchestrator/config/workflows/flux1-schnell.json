@@ -1,0 +1,10 @@
+{
+  "1":{"class_type":"CheckpointLoaderSimple","inputs":{"ckpt_name":"flux1-schnell-fp8.safetensors"}},
+  "2":{"class_type":"CLIPTextEncode","inputs":{"clip":["1",1],"text":"{{prompt}}"}},
+  "3":{"class_type":"FluxGuidance","inputs":{"conditioning":["2",0],"guidance":3.5}},
+  "4":{"class_type":"ConditioningZeroOut","inputs":{"conditioning":["2",0]}},
+  "5":{"class_type":"EmptySD3LatentImage","inputs":{"width":"{{width}}","height":"{{height}}","batch_size":1}},
+  "6":{"class_type":"KSampler","inputs":{"model":["1",0],"positive":["3",0],"negative":["4",0],"latent_image":["5",0],"seed":"{{seed}}","steps":"{{steps}}","cfg":1,"sampler_name":"euler","scheduler":"simple","denoise":1}},
+  "7":{"class_type":"VAEDecode","inputs":{"samples":["6",0],"vae":["1",2]}},
+  "8":{"class_type":"SaveImage","inputs":{"images":["7",0],"filename_prefix":"image/flux1-schnell"}}
+}

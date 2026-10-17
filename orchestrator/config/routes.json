@@ -176,7 +176,7 @@
       },
       "category": "Image",
       "label": "SDXL Turbo",
-      "note": "Fast local images"
+      "note": "Fast local images (draft quality, 512px)"
     },
     "local-heretic-exp": {
       "kind": "ollama",
@@ -205,6 +205,170 @@
       "ctx": 4096,
       "startTimeoutMs": 240000,
       "recommended": true
+    },
+    "image-z-image-turbo": {
+      "kind": "comfyui",
+      "model": "Z-Image Turbo (local)",
+      "workflow": "z-image-turbo.json",
+      "media": "image",
+      "defaults": {
+        "width": 1024,
+        "height": 1024,
+        "steps": 9,
+        "cfg": 1,
+        "negative": ""
+      },
+      "category": "Image",
+      "label": "Z-Image Turbo",
+      "note": "Distilled 6B BF16; 9 steps at 1024px for faster photorealistic images. Generation passed at 1024px with default settings (165s), 2026-10-17.",
+      "recommended": false
+    },
+    "image-qwen-image": {
+      "kind": "comfyui",
+      "model": "Qwen-Image fp8 (local)",
+      "workflow": "qwen-image.json",
+      "media": "image",
+      "defaults": {
+        "width": 1024,
+        "height": 1024,
+        "steps": 25,
+        "cfg": 4
+      },
+      "category": "Image",
+      "label": "Qwen-Image",
+      "note": "20B, best prompt adherence and text rendering; slow, offloads to RAM",
+      "negative": "blurry, low quality, jpeg artifacts, deformed, extra fingers, bad anatomy, watermark, text artifacts"
+    },
+    "image-flux1-dev": {
+      "kind": "comfyui",
+      "model": "FLUX.1 dev fp8 (local)",
+      "workflow": "flux1-dev.json",
+      "media": "image",
+      "defaults": {
+        "width": 1024,
+        "height": 1024,
+        "steps": 25,
+        "cfg": 3.5
+      },
+      "category": "Image",
+      "label": "FLUX.1 dev",
+      "note": "High detail, cfg field = guidance (3.5)"
+    },
+    "image-hidream-fast": {
+      "kind": "comfyui",
+      "model": "HiDream-I1 Fast fp8 (local)",
+      "workflow": "hidream-fast.json",
+      "media": "image",
+      "defaults": {
+        "width": 1024,
+        "height": 1024,
+        "steps": 16,
+        "cfg": 1
+      },
+      "category": "Image",
+      "label": "HiDream-I1 Fast",
+      "note": "17B, 16 steps, 4 text encoders; heavy",
+      "negative": "blurry, low quality, jpeg artifacts, deformed, extra fingers, bad anatomy, watermark, text artifacts"
+    },
+    "image-flux1-schnell": {
+      "kind": "comfyui",
+      "model": "FLUX.1 schnell fp8 (local)",
+      "workflow": "flux1-schnell.json",
+      "media": "image",
+      "defaults": {
+        "width": 1024,
+        "height": 1024,
+        "steps": 4,
+        "cfg": 1
+      },
+      "category": "Image",
+      "label": "FLUX.1 schnell",
+      "note": "4-step FLUX, quick high quality"
+    },
+    "image-realvisxl": {
+      "kind": "comfyui",
+      "model": "RealVisXL V5 (local)",
+      "workflow": "realvisxl.json",
+      "media": "image",
+      "defaults": {
+        "width": 1024,
+        "height": 1024,
+        "steps": 30,
+        "cfg": 5,
+        "negative": "blurry, low quality, jpeg artifacts, watermark, deformed hands, extra fingers"
+      },
+      "category": "Image",
+      "label": "RealVisXL V5",
+      "note": "SDXL photography specialist; 30 steps at 1024px. Generation passed at 1024px with default settings (18s), 2026-10-17.",
+      "recommended": false
+    },
+    "image-qwen-image-2512": {
+      "kind": "comfyui",
+      "model": "Qwen-Image 2512 (local)",
+      "workflow": "qwen-image-2512.json",
+      "media": "image",
+      "defaults": {
+        "width": 1024,
+        "height": 1024,
+        "steps": 22,
+        "cfg": 4,
+        "negative": "blurry, low quality, jpeg artifacts, watermark, deformed hands, extra fingers"
+      },
+      "category": "Image",
+      "label": "Qwen-Image 2512",
+      "note": "Quality-first 20B FP8; 22 steps at 1024px with room for model loading in the app generation window; RAM offload makes it slow. Generation passed at 1024px with default settings (1332s), 2026-10-17.",
+      "recommended": true
+    },
+    "image-z-image-base": {
+      "kind": "comfyui",
+      "model": "Z-Image Base (local)",
+      "workflow": "z-image-base.json",
+      "media": "image",
+      "defaults": {
+        "width": 1024,
+        "height": 1024,
+        "steps": 40,
+        "cfg": 4,
+        "negative": "blurry, low quality, jpeg artifacts, watermark, deformed hands, extra fingers"
+      },
+      "category": "Image",
+      "label": "Z-Image Base",
+      "note": "Undistilled 6B BF16; 40 steps at 1024px for detailed photos and illustration. Generation passed at 1024px with default settings (1321s), 2026-10-17.",
+      "recommended": false
+    },
+    "image-flux2-klein-base": {
+      "kind": "comfyui",
+      "model": "FLUX.2 Klein Base 4B (local)",
+      "workflow": "flux2-klein-base.json",
+      "media": "image",
+      "defaults": {
+        "width": 1024,
+        "height": 1024,
+        "steps": 32,
+        "cfg": 5,
+        "negative": ""
+      },
+      "category": "Image",
+      "label": "FLUX.2 Klein Base 4B",
+      "note": "Undistilled BF16; 32 steps at 1024px; native FLUX.2 scheduler and VAE. Generation passed at 1024px with default settings (360s), 2026-10-17.",
+      "recommended": false
+    },
+    "image-flux2-klein": {
+      "kind": "comfyui",
+      "model": "FLUX.2 Klein 4B (local)",
+      "workflow": "flux2-klein.json",
+      "media": "image",
+      "defaults": {
+        "width": 1024,
+        "height": 1024,
+        "steps": 4,
+        "cfg": 1,
+        "negative": ""
+      },
+      "category": "Image",
+      "label": "FLUX.2 Klein 4B",
+      "note": "Distilled BF16; 4 steps at 1024px; preview and fast alternative. Hand artifacts were visible in the comparison sample. Generation passed at 1024px with default settings (36s), 2026-10-17.",
+      "recommended": false
     }
   },
   "routes": {
@@ -314,6 +478,16 @@
     },
     "image": {
       "chain": [
+        "image-qwen-image-2512",
+        "image-z-image-base",
+        "image-flux2-klein-base",
+        "image-realvisxl",
+        "image-z-image-turbo",
+        "image-flux2-klein",
+        "image-qwen-image",
+        "image-flux1-dev",
+        "image-hidream-fast",
+        "image-flux1-schnell",
         "image-sdxl-turbo"
       ]
     },
@@ -339,6 +513,13 @@
         "local-fast"
       ],
       "memory": true
+    },
+    "image-fast": {
+      "chain": [
+        "image-flux2-klein",
+        "image-z-image-turbo",
+        "image-sdxl-turbo"
+      ]
     }
   },
   "auto": {

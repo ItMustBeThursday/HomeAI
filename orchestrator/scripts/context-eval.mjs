@@ -41,7 +41,7 @@ const TASKS = [
 
 async function ask(entry, task) {
   const sysMem = task.history ? '' : memory.context(task.q, { format: 'mcl', maxChars: memoryChars([entry]), limit: 20 });
-  const system = [SHARED_SYSTEM, 'You are HomeAI, a helpful assistant for a family home. Answer clearly and concisely.', sysMem, sysMem ? MEMORY_NOTE : ''].filter(Boolean).join('\n\n');
+  const system = [SHARED_SYSTEM, 'You are HoopyFrood, a helpful assistant for a family home. Answer clearly and concisely.', sysMem, sysMem ? MEMORY_NOTE : ''].filter(Boolean).join('\n\n');
   const prompt = task.history ? buildPrompt(task.history(), task.q, historyChars([entry])) : task.q;
   const { body } = buildOllamaRequest({ model: entry.model, prompt, system, ctx: effectiveCtx(entry) });
   const started = Date.now();

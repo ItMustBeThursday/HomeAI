@@ -1,10 +1,10 @@
 {
   "default": "workspace",
-  "github": "ItMustBeThursday/HomeAI",
+  "github": "ItMustBeThursday/HoopyFrood",
   "projects": {
     "workspace": {
       "path": "D:\\HomeAI\\workspace",
-      "description": "Shared HomeAI workspace (notes, scratch work)"
+      "description": "Shared HoopyFrood workspace (notes, scratch work)"
     },
     "orchestrator": {
       "path": "D:\\HomeAI\\projects\\orchestrator",
@@ -14,11 +14,11 @@
     },
     "homeai-projects": {
       "path": "D:\\HomeAI\\projects",
-      "description": "Parent folder of all HomeAI projects (for reorganising across them; the running orchestrator lives inside)"
+      "description": "Parent folder of all HoopyFrood projects (for reorganising across them; the running orchestrator lives inside)"
     },
     "homeai-repo": {
       "path": "D:\\HomeAIGit\\HomeAI",
-      "description": "Checkout of the public GitHub repo ItMustBeThursday/HomeAI"
+      "description": "Checkout of the public GitHub repo ItMustBeThursday/HoopyFrood"
     },
     "system": {
       "path": "D:\\",

@@ -101,3 +101,17 @@ test('a corrupt memory primary recovers its retained snapshot without reviving t
   assert.equal(rebuilt.get(n.id), null);
   assert.equal(rebuilt.list().length, 0);
 });
+
+ test('deleted experience excerpts stay retired after restart without rewriting transcripts', () => {
+  const dir = tmp(), memory = createMemoryStore(dir), conversations = createConversationStore(tmp());
+  const c = conversations.create({ title: 'Retirement test' });
+  conversations.append(c.id, { role: 'user', text: 'Obsolete integration details.' });
+  backfillExperiences(memory, conversations);
+  const note = memory.list().find(n => n.source.startsWith('turn:'));
+  memory.remove(note.id);
+  assert.deepEqual(backfillExperiences(memory, conversations), { written: 0, errors: 0 });
+  const rebuilt = createMemoryStore(dir);
+  assert.deepEqual(backfillExperiences(rebuilt, conversations), { written: 0, errors: 0 });
+  assert.equal(rebuilt.list().length, 0);
+  assert.equal(conversations.get(c.id).messages[0].text, 'Obsolete integration details.');
+ });

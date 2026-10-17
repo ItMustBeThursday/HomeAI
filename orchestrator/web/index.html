@@ -4,17 +4,25 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
-  <title>HomeAI</title>
+  <meta name="theme-color" content="#4f6bed">
+  <meta name="description" content="HoopyFrood: private home AI workspace">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icon.svg">
+  <title>HoopyFrood</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%234f6bed'/%3E%3Ctext x='16' y='22.5' font-family='Arial' font-weight='700' font-size='19' text-anchor='middle' fill='white'%3EH%3C/text%3E%3C/svg%3E">
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="polish.css">
 </head>
 <body>
+<a class="skip-link" href="#main-content">Skip to content</a>
+<div id="net-banner" class="net-banner" role="alert" hidden>Connection to the HoopyFrood service lost. Retrying…</div>
 <div id="app" class="app">
   <aside id="sidebar" class="sidebar" aria-label="Main navigation">
     <div class="side-head">
       <div class="logo" aria-hidden="true">H</div>
-      <div class="brand-text"><strong>HomeAI</strong><span id="health" class="health" title="Service health">…</span></div>
+      <div class="brand-text"><strong>HoopyFrood</strong><span id="health" class="health" title="Service health">…</span></div>
       <button id="collapse" class="icon-btn" title="Collapse sidebar" aria-label="Collapse sidebar"></button>
     </div>
     <button id="open-palette" class="palette-hint" title="Command palette (Ctrl+K)">
@@ -51,7 +59,7 @@
       </div>
     </header>
 
-    <main>
+    <main id="main-content" tabindex="-1">
       <!-- CHAT -->
       <section id="tab-chat" class="tab active">
         <div id="chat-tabs" class="chat-tabs" role="group" aria-label="Open and working chats"></div>
@@ -74,7 +82,7 @@
           </div>
           <form id="composer" class="composer">
             <div id="attach-strip" class="attach-strip" hidden></div>
-            <textarea id="prompt" rows="1" aria-label="Message HomeAI" placeholder="Message HomeAI..." required></textarea>
+            <textarea id="prompt" rows="1" aria-label="Message HoopyFrood" placeholder="Message HoopyFrood..." required></textarea>
             <div id="slash-menu" class="slash-menu" hidden></div>
             <div class="composer-row">
               <label class="sel">Route <select id="route"></select></label>
@@ -162,8 +170,8 @@
 
       <!-- MEMORY -->
       <section id="tab-memory" class="tab page">
-        <p class="muted">Durable facts and preferences. Routes with <code>"memory": true</code> see notes tagged <code>core</code> plus the notes that best match each prompt. Deleted notes move to <code>data/memory/trash</code>.</p>
-        <div class="toolbar"><input id="mem-search" type="search" placeholder="Search notes…" size="28"><button id="mem-refresh" class="ghost sm">Refresh</button></div>
+        <p class="muted">Durable facts and preferences from the main bank and saved notes. Historical excerpts remain searchable separately. Deleted notes move to <code>data/memory/trash</code>.</p>
+        <div class="toolbar"><input id="mem-search" type="search" placeholder="Search notes…" size="28"><select id="mem-view"><option value="durable">Durable memory</option><option value="history">Historical excerpts</option><option value="all">All records</option></select><button id="mem-refresh" class="ghost sm">Refresh</button><span id="mem-count" class="muted"></span></div>
         <div id="mem-list" class="note-grid"></div>
         <div class="panel mt">
           <div class="panel-head"><h3 id="mem-form-title">Add a note</h3></div>
@@ -264,7 +272,7 @@
         <p class="muted">Log in to services once and the orchestrator keeps the login, so you and the models can use them without pasting tokens again. Logins are encrypted with Windows (DPAPI, this user account only) in <code>data/vault.json</code>, never sent to the browser again, never shown to models, and never published. Use a <b>fine-grained token</b> limited to the repos you want to share; creating issues or comments still asks for confirmation. Add other token-based services under <code>providers</code> in <code>config/connections.json</code>.</p>
         <div id="conn-list"></div>
         <details class="panel mt"><summary>How to get a GitHub token</summary>
-          <p class="muted">GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate. Pick the <code>ItMustBeThursday/HomeAI</code> repo with Contents, Issues, Pull requests and Actions access, as needed. For one-click "Sign in with GitHub", register an OAuth app with Device Flow enabled and put its client ID in <code>config/connections.json</code> under <code>github.clientId</code>.</p>
+          <p class="muted">GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate. Pick the <code>ItMustBeThursday/HoopyFrood</code> repo with Contents, Issues, Pull requests and Actions access, as needed. For one-click "Sign in with GitHub", register an OAuth app with Device Flow enabled and put its client ID in <code>config/connections.json</code> under <code>github.clientId</code>.</p>
         </details>
       </section>
 
@@ -272,7 +280,7 @@
       <section id="tab-devices" class="tab page">
         <p class="muted">The service always requires a token. This PC's WebUI picks up the admin token automatically. Other devices get a limited token: <b>read</b> dashboards, <b>chat</b> read + models (never shell or agents), <b>logan</b> the Logan feed only, <b>admin</b> everything. Tokens are shown once and stored only as hashes.</p>
         <div id="whoami" class="toolbar"></div>
-        <div id="dev-list"></div>
+        <div id="dev-list"></div><div class="panel mt"><h3>Pair a companion on Wi-Fi</h3><p>Start here on this PC, then enter the six-digit code in the companion. The code expires after five minutes and grants read and chat access.</p><button id="pair-start" class="primary">Create pairing code</button> <button id="pair-cancel" class="ghost">Cancel</button><p id="pair-info" role="status"></p><canvas id="pair-qr" hidden aria-label="Companion pairing QR code"></canvas><p><code id="pair-link"></code></p></div>
         <div class="panel mt">
           <div class="panel-head"><h3>Add a device</h3></div>
           <form id="dev-form" class="row">
@@ -287,7 +295,7 @@
           <div id="dev-token" class="token-box" hidden></div>
         </div>
         <details class="panel mt"><summary>Reaching the service from other devices</summary>
-          <p class="muted">By default it listens on this PC only. Edit <code>config/network.json</code> and restart: set <code>host</code> to <code>0.0.0.0</code> (or your Tailscale IP), add names to <code>allowedHosts</code> or set <code>allowPrivateIPs</code> for LAN/Tailscale addresses. Shell, agents, config and device management only work from this PC unless <code>remoteAdmin</code> is true. Private HTTPS: <code>tailscale serve --bg 18850</code>, then add the Tailscale name to <code>allowedHosts</code>. See README, "Network access".</p>
+          <p class="muted">By default it listens on this PC only. Edit <code>config/network.json</code> and restart: use <code>network.lan.enabled</code> and select the Wi-Fi IP in <code>network.lan.addresses</code>. Add only that address to <code>allowedHosts</code>. Shell, agents, config and device management only work from this PC unless <code>remoteAdmin</code> is true. Private HTTPS: <code>tailscale serve --bg 18850</code>, then add the Tailscale name to <code>allowedHosts</code>. See README, "Network access".</p>
         </details>
       </section>
 
@@ -358,6 +366,28 @@
     <input id="input-field" autocomplete="off" class="block">
     <div class="row mt"><span class="spacer"></span><button type="button" id="input-cancel" class="ghost">Cancel</button><button value="ok" class="primary" id="input-ok">OK</button></div>
   </form>
+</dialog>
+
+<dialog id="confirm-dialog" aria-labelledby="confirm-title" aria-describedby="confirm-msg">
+  <form method="dialog" id="confirm-form">
+    <h3 id="confirm-title">Confirm</h3>
+    <p id="confirm-msg" class="muted"></p>
+    <div class="row mt"><span class="spacer"></span><button type="button" id="confirm-cancel" class="ghost">Cancel</button><button value="ok" class="primary" id="confirm-ok">Confirm</button></div>
+  </form>
+</dialog>
+
+<dialog id="shortcuts-dialog" aria-labelledby="shortcuts-title">
+  <div class="adm-head"><h3 id="shortcuts-title">Keyboard shortcuts</h3><span class="spacer"></span><button type="button" id="shortcuts-close" class="ghost sm" aria-label="Close shortcuts">Close</button></div>
+  <dl class="shortcut-list">
+    <dt><kbd>Ctrl</kbd> <kbd>K</kbd></dt><dd>Command palette: pages, models, chats</dd>
+    <dt><kbd>Ctrl</kbd> <kbd>Shift</kbd> <kbd>O</kbd></dt><dd>New chat</dd>
+    <dt><kbd>Ctrl</kbd> <kbd>B</kbd></dt><dd>Show or hide the sidebar</dd>
+    <dt><kbd>Alt</kbd> <kbd>1</kbd>–<kbd>9</kbd></dt><dd>Jump to a page</dd>
+    <dt><kbd>Enter</kbd></dt><dd>Send (or <kbd>Ctrl</kbd> <kbd>Enter</kbd>, see settings)</dd>
+    <dt><kbd>Shift</kbd> <kbd>Enter</kbd></dt><dd>New line in a message</dd>
+    <dt><kbd>/</kbd></dt><dd>Slash commands in the message box</dd>
+    <dt><kbd>?</kbd></dt><dd>This list</dd>
+  </dl>
 </dialog>
 
 <script type="module" src="app.js"></script>
