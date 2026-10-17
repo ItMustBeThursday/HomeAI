@@ -3,7 +3,7 @@
 Installs or upgrades the HomeAI evolution kit (switch/voice/model policy, Node runner, switch-lab preview)
 from this clone's home-ai-kit\evolution folder into D:\HomeAI\extensions\evolution.
 
-Additive only: no OpenClaw config, plugin, service, access or credential changes.
+Additive only: no orchestrator config, service, access or credential changes.
 - Fresh install: stage, hash-verify, then run the kit's offline tests.
 - Already current (receipt hashes match this clone): only reruns the tests.
 - Upgrade: the existing install is MOVED (not deleted) to D:\HomeAI\state\evolution-backups\installed-<stamp>,

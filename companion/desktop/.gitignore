@@ -1,0 +1,4 @@
+node_modules/
+dist/
+src/renderer/bundle.js
+test/.smoke-identity.json

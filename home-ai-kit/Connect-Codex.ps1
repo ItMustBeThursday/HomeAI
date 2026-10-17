@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 [CmdletBinding()]
 param([string]$Root='D:\HomeAI',[string]$CodexPath,[switch]$PlanOnly)
 . (Join-Path $PSScriptRoot 'Common.ps1')
@@ -62,7 +62,7 @@ foreach($file in Get-ChildItem -LiteralPath $PSScriptRoot -File) {
     $destination=Assert-HomeAIChild (Join-Path $settings.root ('scripts\'+$file.Name)) $settings.root
     if($file.FullName -ne $destination){Copy-Item -LiteralPath $file.FullName -Destination $destination -Force}
 }
-& (Join-Path $PSScriptRoot 'Start-HomeAI.ps1') -Root $settings.root -NoBrowser
+& (Join-Path $PSScriptRoot 'Start-HomeAI.ps1') -Root $settings.root
 Write-Host 'Codex connected. No inference was sent by this installer.'
 Write-Host 'Use Ask-HomeAI.ps1 -Mode BestAvailable -Provider Codex -Prompt "Your task".'
-Write-Host 'Hosted prompts no longer ask SEND, as requested. This text bridge does not register a model in the OpenClaw dashboard.'
+Write-Host 'Hosted prompts no longer ask SEND, as requested.'

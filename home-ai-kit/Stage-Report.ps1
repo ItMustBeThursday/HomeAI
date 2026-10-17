@@ -23,7 +23,7 @@ function New-HomeAIStageReport($Settings,$Benchmark,$Dependencies,[bool]$Gateway
         generatedAt=(Get-Date).ToUniversalTime().ToString('o');
         gatewayHealthy=$GatewayHealthy;dependencies=$Dependencies;hardware=$Hardware;
         context=$Settings.context;models=$summary;cloudInference=$false;
-        runtimeVersions=@{openclaw=$Settings.openclawVersion;node=$Settings.nodeVersion;ollama=$Settings.ollamaVersion};
+        runtimeVersions=@{node=$Settings.nodeVersion;ollama=$Settings.ollamaVersion};
         completedAutomation=@('dependency checks','gateway health check','saved model benchmark','status report');
         notImplemented=@('full specialist scheduler','policy-controlled PC tools','professional document worker',
             'image backend','voice modes','assistive hardware/control integration');

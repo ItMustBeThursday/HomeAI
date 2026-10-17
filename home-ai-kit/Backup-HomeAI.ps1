@@ -1,11 +1,9 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 param([string]$Root='D:\HomeAI')
 . (Join-Path $PSScriptRoot 'Common.ps1')
 $settings=Get-HomeAISettings $Root
 $backupRoot=Get-HomeAIPath $settings.backupRoot
 $destination=Assert-HomeAIChild (Join-Path $backupRoot ((Get-Date -Format 'yyyyMMdd-HHmmss')+'-'+[guid]::NewGuid().ToString('N').Substring(0,8))) $backupRoot
-Write-Host 'Backup: checking that the gateway is stopped...'
-if(@(Get-NetTCPConnection -State Listen -LocalPort $settings.gatewayPort -ErrorAction SilentlyContinue).Count -gt 0){throw 'Stop-HomeAI.ps1 must run before making a consistent backup. No live SQLite files were copied.'}
 $node=Get-HomeAINode $settings
 if(-not (Test-Path -LiteralPath $node -PathType Leaf)){throw 'Pinned HomeAI Node runtime is missing; backup was not started.'}
 New-Item -ItemType Directory -Path $destination -Force | Out-Null

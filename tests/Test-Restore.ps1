@@ -11,6 +11,9 @@ foreach($path in @($install,$backup,(Join-Path $install 'state\openclaw\plugin-s
 Write-HomeAIJson (Join-Path $install 'homeai.json') @{
     owner='home-ai-kit-v1';root=$install;backupRoot=$backup;gatewayPort=18795;ollamaPort=11435;nodeVersion='24.21.0'
 }
+$fixtureNode=Get-HomeAINode (Get-HomeAISettings $install)
+New-Item -ItemType Directory -Path (Split-Path $fixtureNode -Parent) -Force | Out-Null
+Copy-Item -LiteralPath (Get-Command node.exe -ErrorAction Stop).Source -Destination $fixtureNode
 function Write-Text([string]$Relative,[string]$Text){[IO.File]::WriteAllText((Join-Path $install $Relative),$Text)}
 function Read-Text([string]$Base,[string]$Relative){Get-Content -LiteralPath (Join-Path $Base $Relative) -Raw}
 function Get-Backups {@(Get-ChildItem -LiteralPath $backup -Directory)}
@@ -29,7 +32,7 @@ Write-Text 'state\openclaw\plugin-skills\generated.txt' 'regenerated runtime'
 
 & (Join-Path $kit 'Restore-HomeAI.ps1') -Root $install -Snapshot $snapshot -PlanOnly
 if((Read-Text $install 'projects\app\main.txt') -ne 'damaged'){throw 'PlanOnly changed files.'}
-if((Get-Backups).Count -ne 1){throw 'PlanOnly made a backup.'}
+if(@(Get-Backups).Count -ne 1){throw 'PlanOnly made a backup.'}
 Write-Output 'PASS: PlanOnly changes nothing.'
 
 & (Join-Path $kit 'Restore-HomeAI.ps1') -Root $install -Snapshot $snapshot

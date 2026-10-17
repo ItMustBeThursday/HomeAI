@@ -25,7 +25,7 @@ if ($ImagePath) {
     if ($info.Length -gt 20MB) { throw 'Use an image below 20 MB.' }
     $message.images = @([Convert]::ToBase64String([IO.File]::ReadAllBytes($info.FullName)))
 }
-Write-Host "Task: $Task; model: $model. This direct helper returns text; OpenClaw owns persistent chat."
+Write-Host "Task: $Task; model: $model. This direct helper returns text; the orchestrator WebUI owns persistent chat."
 # Serialize direct helper calls across processes; the runtime also limits loaded models and parallel inference.
 $lock = New-Object Threading.Mutex($false, 'Local\HomeAI-Inference')
 try {

@@ -23,6 +23,8 @@ try {
         try {
             $state = Invoke-RestMethod 'http://127.0.0.1:18850/api/schedule' -Headers $headers -TimeoutSec 5
             $busy = @($state.queue.PSObject.Properties | Where-Object { $_.Value.active -gt 0 -or $_.Value.queued -gt 0 }).Count
+            $jobState = Invoke-RestMethod 'http://127.0.0.1:18850/api/jobs' -Headers $headers -TimeoutSec 5
+            $busy += @($jobState.jobs | Where-Object { $_.status -in @('queued','running','planning') }).Count
             if ($busy -eq 0) { $quiet++ } else { $quiet = 0 }
         } catch { $quiet = 0 }
         if ($quiet -lt 4) { continue }

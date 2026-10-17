@@ -1,6 +1,6 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 [CmdletBinding()]
-param([string]$Root='D:\HomeAI',[switch]$ModelsOnly,[switch]$NoBrowser)
+param([string]$Root='D:\HomeAI')
 . (Join-Path $PSScriptRoot 'Common.ps1')
 $settings = Get-HomeAISettings $Root
 Set-HomeAIEnvironment $settings
@@ -17,25 +17,4 @@ if (-not (Test-HomeAIListenerOwned $settings 'ollama' $settings.ollamaPort $olla
     }
     if (-not $ready) { throw 'Ollama did not become ready within 60 seconds. Read its log.' }
 }
-if ($ModelsOnly -or -not $settings.openclawInstalled) { Write-Host 'Local model server is ready.'; return }
-$node = Get-HomeAINode $settings
-$claw = Get-HomeAIOpenClaw $settings
-Invoke-HomeAINative $node @($claw,'config','validate')
-if (-not (Test-HomeAIListenerOwned $settings 'gateway' $settings.gatewayPort $node)) {
-    $argsLine = '"'+$claw+'" gateway run'
-    $process = Start-Process -FilePath $node -ArgumentList $argsLine -PassThru -WindowStyle Hidden `
-        -WorkingDirectory $settings.root -RedirectStandardOutput (Join-Path $settings.root 'logs\gateway-out.log') `
-        -RedirectStandardError (Join-Path $settings.root 'logs\gateway-error.log')
-    Save-HomeAIProcess $settings 'gateway' $process
-    $ready = $false
-    for ($i=0;$i -lt 240;$i++) {
-        $listeners = @(Get-NetTCPConnection -State Listen -LocalPort $settings.gatewayPort -ErrorAction SilentlyContinue)
-        if ($listeners.Count -gt 0) { $ready=$true; break }
-        if ($process.HasExited) { throw 'OpenClaw exited. Read logs\gateway-error.log.' }
-        if($i -gt 0 -and $i % 15 -eq 0){Write-Host "Waiting for OpenClaw cold start: $i / 240 seconds..."}
-        Start-Sleep -Seconds 1
-    }
-    if (-not $ready) { throw 'Gateway did not start within 240 seconds. Read its log.' }
-}
-Write-Host "OpenClaw is running locally on port $($settings.gatewayPort)."
-if (-not $NoBrowser) { Invoke-HomeAINative $node @($claw,'dashboard') }
+Write-Host 'Local model server is ready. The orchestrator is started separately (Restart-Orchestrator.ps1).'

@@ -1,0 +1,1 @@
+{ "name": "homeai-discord-bridge", "version": "0.1.0", "private": true, "type": "module", "scripts": { "start": "node bridge.mjs", "test": "node --test" }, "dependencies": { "discord.js": "^14.16.0" } }

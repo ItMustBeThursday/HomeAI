@@ -1,11 +1,7 @@
 CLAUDE CODE
 
-For OpenClaw chat, run Connect-OpenClawChat.ps1 (see READ-FIRST.txt).
-It enables OpenClaw's bundled claude-cli backend using native Claude Code
-subscription login. It does not control Claude Desktop or expose its GUI.
-The connector installs pinned Claude Code 2.1.299 if needed. Confirm paid
-extra usage is OFF when prompted; no API key is used.
-
-Connect-Claude.ps1 is also available as an independent installer for the
-standalone Ask-HomeAI.ps1 text worker. Chat and standalone helpers differ.
-Actual hosted replies and plan eligibility must be checked on the gaming PC.
+Connect-Claude.ps1 installs pinned Claude Code if needed and connects native
+subscription login for the standalone Ask-HomeAI.ps1 text worker. It does not
+control Claude Desktop. Confirm paid extra usage is OFF when prompted; no API
+key is used. Actual hosted replies and plan eligibility must be checked on the
+gaming PC.

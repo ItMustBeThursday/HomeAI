@@ -101,7 +101,7 @@ if($excluded.Count) {
 }
 if($inPlace) {
     Write-Host "Pre-restore backup: $safety"
-    Write-Host 'Run Start-HomeAI.ps1. If a plugin runtime is missing, re-run Connect-OpenClawChat.ps1 to reinstall the recorded packages.'
+    Write-Host 'Run Start-HomeAI.ps1 and Restart-Orchestrator.ps1.'
 } else {
     Write-Host 'This copy is for inspection or testing. Its homeai.json still names the original folder, so it is not runnable as-is.'
 }

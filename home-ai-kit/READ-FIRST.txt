@@ -1,20 +1,13 @@
-HOMEAI - OPENCLAW SUBSCRIPTION CHAT
+HOMEAI HOST TOOLS
 
-Existing gaming-PC installation:
-1. Extract this ZIP and keep the helper files together.
-2. Open Windows PowerShell in the extracted folder.
-3. Run:
-   powershell -NoProfile -ExecutionPolicy Bypass -File .\Connect-OpenClawChat.ps1
-4. Complete Claude Code/ChatGPT sign-in when prompted.
-5. Open a NEW dashboard chat and use /status to check its actual model/runtime.
-   /codex status reports native Codex account limits.
+Current service: D:\HomeAI\projects\orchestrator, http://127.0.0.1:18850.
+Read orchestrator/README.md in the repository for current operations.
+Restart only via D:\HomeAI\scripts\Restart-Orchestrator.ps1 after active
+jobs and model queues are idle. Never interrupt the current coding job.
 
-This installs the official Codex plugin and enables bundled Claude Code.
-Default preference: Codex, Claude Code, local Qwen. -Primary Claude reverses
-hosted preference. -Primary Qwen selects local-only defaults.
-No full setup rerun or model redownload is needed.
+This kit retains local model setup/start/stop, verified backup/restore,
+model staging, and standalone Claude/Codex subscription helpers.
+No API-key billing fallback is configured. Native CLI sign-in is required.
 
-Read README.md for tested boundaries and later stages. This package connects
-chat; autonomous coding, desktop control, documents/images and voice are not
-implemented yet. Claude Desktop login alone is insufficient: complete the
-native Claude Code sign-in. No API key or API billing fallback is configured.
+Preserve OpenClaw until explicit cutover approval. Legacy companion clients
+still depend on its protocol; migration is incomplete.

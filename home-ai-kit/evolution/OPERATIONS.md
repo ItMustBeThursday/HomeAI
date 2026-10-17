@@ -6,7 +6,7 @@ Status: review artifacts only, 2026-10-14. Neither PowerShell script has been pa
 
 ## Scope and preservation
 
-This kit is additive, not a replacement for the running OpenClaw/HomeAI installation. Do not touch D:\HomeAIGit\HomeAI, its uncommitted Backup-HomeAI.ps1/Common.ps1/Test-Package.ps1 changes or new Restore-HomeAI.ps1/Test-Restore.ps1, runtime configuration, credentials, services or account state. Existing backup locations on D/E are the user's layout, not assumed paths or available capacity.
+This kit is additive to the running HomeAI orchestrator installation. Do not touch D:\HomeAIGit\HomeAI, its uncommitted Backup-HomeAI.ps1/Common.ps1/Test-Package.ps1 changes or new Restore-HomeAI.ps1/Test-Restore.ps1, runtime configuration, credentials, services or account state. Existing backup locations on D/E are the user's layout, not assumed paths or available capacity.
 
 Prepare owns only a newly created D:\HomeAI\extensions\evolution tree. Its source must be a separate D/E directory containing the exact allowlisted files. No recursive copy occurs. No .env, credential/config store, model, logs, repository history or arbitrary backup folders are copied. Review allowlisted source content for accidentally embedded secrets before staging; filename allowlisting cannot detect secrets inside code/docs.
 

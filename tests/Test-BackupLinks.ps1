@@ -13,6 +13,9 @@ foreach($path in @($install,$backup,$external,(Join-Path $install 'state\opencla
 Write-HomeAIJson (Join-Path $install 'homeai.json') @{
     owner='home-ai-kit-v1';root=$install;backupRoot=$backup;gatewayPort=18795;nodeVersion='24.21.0'
 }
+$fixtureNode=Get-HomeAINode (Get-HomeAISettings $install)
+New-Item -ItemType Directory -Path (Split-Path $fixtureNode -Parent) -Force | Out-Null
+Copy-Item -LiteralPath (Get-Command node.exe -ErrorAction Stop).Source -Destination $fixtureNode
 [IO.File]::WriteAllText((Join-Path $external 'outside.txt'),'outside-install sentinel: do not copy')
 [IO.File]::WriteAllText((Join-Path $install 'workspace\skills\personal.txt'),'preserve this user skill')
 New-Item -ItemType Junction -Path (Join-Path $install 'state\openclaw\plugin-skills\browser-automation') -Target $external | Out-Null
@@ -61,7 +64,7 @@ New-Item -ItemType Junction -Path (Join-Path $install 'projects\unexpected-link'
 $before=@(Get-ChildItem -LiteralPath $backup -Directory | Select-Object -ExpandProperty FullName)
 $caught=$null
 try {& (Join-Path $kit 'Backup-HomeAI.ps1') -Root $install | Out-Null} catch {$caught=$_.Exception.Message}
-if(-not $caught -or $caught -notmatch 'unrecognized link'){throw 'Unexpected project link was not rejected.'}
+if(-not $caught -or $caught -notmatch 'Backup did not finish'){throw 'Unexpected project link was not rejected by the streaming helper.'}
 $new=@(Get-ChildItem -LiteralPath $backup -Directory | Where-Object {$before -notcontains $_.FullName})
 foreach($folder in $new) {
     if(Test-Path -LiteralPath (Join-Path $folder.FullName 'backup-manifest.json')){throw 'Failed snapshot was marked complete.'}

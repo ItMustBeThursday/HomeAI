@@ -1,12 +1,6 @@
 CODEX
 
-For OpenClaw chat, run Connect-OpenClawChat.ps1 (see READ-FIRST.txt).
-It installs official @openclaw/codex 2026.10.3, which uses its managed native
-Codex app-server client. Complete the native ChatGPT account login. It does
-not control the desktop window or use an API key. Use /status and /codex status
-in a new chat to check runtime and limits.
-
-Connect-Codex.ps1 independently connects the installed native executable to
-Ask-HomeAI.ps1's standalone prompt worker. That private profile is separate
-from OpenClaw's native Codex account profile. Desktop login alone does not
-establish either connector's profile.
+Connect-Codex.ps1 connects the native Codex executable to the standalone
+Ask-HomeAI.ps1 text worker through a private profile. The orchestrator uses
+its independent runtime in D:/HomeAI/runtime/codex. Desktop login alone
+does not establish either profile. No API-key billing fallback is configured.

@@ -1,11 +1,11 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 [CmdletBinding()]
 param([string]$Root='D:\HomeAI',[switch]$PlanOnly,[switch]$SkipLogin)
 . (Join-Path $PSScriptRoot 'Common.ps1')
 . (Join-Path $PSScriptRoot 'Claude-Common.ps1')
 $settings=Get-HomeAISettings $Root
 Write-Host 'Install optional Claude Code 2.1.299 from its official Windows package, then sign in to Claude Pro.'
-Write-Host 'Qwen and OpenClaw remain local defaults. No API key or paid extra usage is configured.'
+Write-Host 'Qwen remains the local default. No API key or paid extra usage is configured.'
 if($PlanOnly){Write-Host 'PLAN ONLY: no downloads, login, profile writes, or Claude requests.';return}
 & (Join-Path $PSScriptRoot 'Stop-HomeAI.ps1') -Root $settings.root
 & (Join-Path $PSScriptRoot 'Backup-HomeAI.ps1') -Root $settings.root | Out-Null
@@ -73,7 +73,7 @@ $connectorPath=Join-Path $settings.root 'state\claude-connector.json'
 $connector=Get-Content -LiteralPath $connectorPath -Raw | ConvertFrom-Json
 $connector | Add-Member -NotePropertyName paidExtraUsageDisabledByUser -NotePropertyValue ($billing -ceq 'OFF') -Force
 Write-HomeAIJson $connectorPath $connector
-& (Join-Path $PSScriptRoot 'Start-HomeAI.ps1') -Root $settings.root -NoBrowser
+& (Join-Path $PSScriptRoot 'Start-HomeAI.ps1') -Root $settings.root
 Write-Host 'Connector installed. Try Ask-HomeAI.ps1 -Mode BestAvailable -Prompt "Draft a short project brief".'
 Write-Host 'Hosted inference prompts are authorized without SEND confirmation; usage limits switch to the other connected worker, then Qwen.'
-Write-Host 'This first bridge is text-only and separate from OpenClaw chat. UI integration is a later step.'
+Write-Host 'This first bridge is text-only and separate from the orchestrator WebUI.'

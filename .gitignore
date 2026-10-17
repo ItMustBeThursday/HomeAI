@@ -19,3 +19,12 @@ node_modules/
 /projects/
 /HomeAI-Claude/
 /HomeAI-Codex/
+family-connection.json
+*.jks
+*.keystore
+.gradle/
+**/build/
+local.properties
+**/.smoke-identity.json
+**/dist/
+**/src/renderer/bundle.js

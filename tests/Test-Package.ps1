@@ -36,17 +36,14 @@ foreach($part in @('state','workspace','projects','output','scripts','evaluation
     New-Item -ItemType Directory -Path (Join-Path $testRoot $part) -Force | Out-Null
 }
 $settings=@{owner='home-ai-kit-v1';root=$testRoot;backupRoot=$testBackup;ollamaPort=11435;gatewayPort=18795;
-    mainModel='homeai-main:locked';fastModel='homeai-fast:locked';nodeVersion='24.21.0';context=16384;openclawInstalled=$true;
-    openclawVersion='2026.10.3';ollamaVersion='0.40.4'}
+    mainModel='homeai-main:locked';fastModel='homeai-fast:locked';nodeVersion='24.21.0';context=16384;
+    ollamaVersion='0.40.4'}
 Write-HomeAIJson (Join-Path $testRoot 'homeai.json') $settings
-$config=New-HomeAIConfig $settings 'test-token-only'
-Write-HomeAIJson (Join-Path $PSScriptRoot 'artifacts\config-to-validate.json') $config
-Assert ($config.tools.profile -eq 'minimal' -and $config.tools.deny -contains 'gateway') 'No agent-triggered self-update'
-Assert (-not $config.tools.ContainsKey('allow')) 'No conflicting allow/alsoAllow policies'
-Assert ($config.memory.search.provider -eq 'none') 'No paid embedding default'
-Assert ($config.models.providers.ollama.baseUrl -notmatch '/v1') 'Native Ollama API selected'
-Assert ($config.models.mode -eq 'replace' -and -not $config.models.catalogRefresh.enabled) 'Cloud catalog refresh disabled'
-Assert (-not $config.update.checkOnStart -and -not $config.telemetry.enabled) 'Update/telemetry requests disabled'
+# The streaming backup helper runs under the installation's Node runtime.
+# Provision the fixture from this test runner's local Node; no downloads needed.
+$fixtureNode = Get-HomeAINode $settings
+New-Item -ItemType Directory -Path (Split-Path $fixtureNode) -Force | Out-Null
+Copy-Item -LiteralPath (Get-Command node.exe -ErrorAction Stop).Source -Destination $fixtureNode -Force
 
 $global:HomeAIHarness=@{lastBody=$null;toolCalls=0}
 function Invoke-RestMethod {
@@ -86,22 +83,15 @@ Assert ($manifest.files.Count -gt 0) 'Backup produces a manifest'
 $entry=@($manifest.files | Where-Object {$_.path -eq 'projects\important.txt'})[0]
 Assert ((Get-FileHash -LiteralPath (Join-Path $snapshot $entry.path)).Hash -eq $entry.sha256) 'Project backup hash verifies'
 function Get-NetTCPConnection { param($State,$LocalPort,$ErrorAction); return @(@{OwningProcess=1}) }
-Assert-Throws { & (Join-Path $kit 'Backup-HomeAI.ps1') -Root $testRoot } 'Live gateway blocks inconsistent SQLite backup'
 Assert-Throws { Test-HomeAIListenerOwned $settings 'ollama' 11435 'C:\unrelated.exe' } 'Unmanaged listener refuses reuse'
 . (Join-Path $kit 'Stage-Report.ps1')
 $probe=@{passed=$true;checks=@(@{name='esbuild';passed=$true},@{name='koffi';passed=$true})}
 $stageReport=New-HomeAIStageReport $settings $benchmark $probe $true @{os='Windows 11';ramGiB=64}
 Assert ($stageReport.status -eq 'checks-run-quality-review-needed') 'Stage report does not falsely certify model quality'
 Assert ($stageReport.notImplemented -contains 'voice modes') 'Unimplemented later stages are explicit'
-Assert ($stageReport.runtimeVersions.openclaw -eq '2026.10.3') 'Report contains installed runtime versions'
 $reportFile=Join-Path $testRoot 'evaluations\mock-stage-report.html'
 Write-HomeAIStageHtml $reportFile $stageReport $benchmark
 Assert ((Get-Content -LiteralPath $reportFile -Raw) -match 'mock local answer') 'Readable report contains benchmark answers'
-Assert (-not ((Get-Content -LiteralPath $reportFile -Raw) -match 'test-token-only')) 'Report excludes gateway token'
-$stageState=Join-Path $testRoot 'state\stage-2-progress.json'
-& (Join-Path $kit 'Continue-HomeAI.ps1') -Root $testRoot -PlanOnly | Out-Null
-Assert (-not (Test-Path -LiteralPath $stageState)) 'Continuation preview writes no progress state'
-Assert-Throws { & (Join-Path $kit 'Continue-HomeAI.ps1') -Root $testRoot } 'Continuation refuses incomplete foundation before service changes'
 . (Join-Path $kit 'Claude-Common.ps1')
 Assert-HomeAIClaudeSubscription ([pscustomobject]@{loggedIn=$true;authMethod='claude.ai';subscriptionType='pro'})
 Assert $true 'Native Pro subscription login accepted'

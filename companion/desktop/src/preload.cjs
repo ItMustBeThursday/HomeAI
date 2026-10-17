@@ -1,0 +1,3 @@
+const {contextBridge,ipcRenderer}=require('electron');
+const methods=new Set(['status','configure','forget','reconnect','sessions','history','newSession','send','abort','models','agents','model','export','captureScreen']);
+contextBridge.exposeInMainWorld('homeai',{call:async(method,params={})=>{if(!methods.has(method))throw new Error('Unknown operation');const r=await ipcRenderer.invoke('homeai:invoke',method,params);if(!r.ok)throw new Error(r.error);return r.value;},onEvent:fn=>{const listener=(_e,event)=>fn(event);ipcRenderer.on('homeai:event',listener);return()=>ipcRenderer.removeListener('homeai:event',listener);}});

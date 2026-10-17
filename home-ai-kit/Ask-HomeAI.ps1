@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 [CmdletBinding()]
 param(
     [string]$Root='D:\HomeAI',
@@ -16,5 +16,5 @@ if($Mode -eq 'BestAvailable') {
     if($result.success){Write-Host "Answered by $($result.provider).";$result.answer;return}
     Write-Host 'Hosted workers are unavailable or limited. Using local Qwen.'
 }
-& (Join-Path $PSScriptRoot 'Start-HomeAI.ps1') -Root $settings.root -ModelsOnly
+& (Join-Path $PSScriptRoot 'Start-HomeAI.ps1') -Root $settings.root
 & (Join-Path $PSScriptRoot 'Invoke-HomeAI.ps1') -Root $settings.root -Prompt $Prompt -Think

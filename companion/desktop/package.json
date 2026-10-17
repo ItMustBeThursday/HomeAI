@@ -1,0 +1,54 @@
+{
+    "name":  "homeai-desktop",
+    "version":  "0.1.0",
+    "private":  true,
+    "description":  "HomeAI secure desktop companion",
+    "author":  "HomeAI",
+    "type":  "module",
+    "main":  "src/main/main.mjs",
+    "scripts":  {
+                    "start":  "electron .",
+                    "test":  "node --test test/*.test.mjs",
+                    "bundle":  "esbuild src/renderer/app.js --bundle --outfile=src/renderer/bundle.js",
+                    "dist":  "npm run bundle \u0026\u0026 electron-builder --win nsis portable"
+                },
+    "dependencies":  {
+                         "dompurify":  "^3.2.7",
+                         "markdown-it":  "^14.1.0",
+                         "ws":  "^8.18.3"
+                     },
+    "devDependencies":  {
+                            "electron":  "^39.0.0",
+                            "electron-builder":  "^26.0.12",
+                            "esbuild":  "^0.25.11"
+                        },
+    "build":  {
+                  "appId":  "ai.homeai.companion",
+                  "productName":  "HomeAI",
+                  "directories":  {
+                                      "output":  "dist"
+                                  },
+                  "files":  [
+                                "src/**/*",
+                                "package.json"
+                            ],
+                  "win":  {
+                              "target":  [
+                                             "nsis",
+                                             "portable"
+                                         ],
+                              "signAndEditExecutable":  false
+                          },
+                  "nsis":  {
+                               "oneClick":  false,
+                               "allowToChangeInstallationDirectory":  true,
+                               "createDesktopShortcut":  true
+                           },
+                  "extraResources":  [
+                                         {
+                                             "to":  "family-connection.json",
+                                             "from":  "resources/family-connection.json"
+                                         }
+                                     ]
+              }
+}

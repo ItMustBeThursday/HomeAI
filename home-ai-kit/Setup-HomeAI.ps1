@@ -1,15 +1,13 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 [CmdletBinding()]
 param(
     [string]$Root = 'D:\HomeAI',
     [string]$BackupRoot = 'E:\HomeAI-Backups',
     [switch]$PlanOnly,
-    [switch]$SkipOpenClaw,
     [switch]$IncludeComparisonModels,
     [switch]$IncludeFastModel,
     [ValidateRange(16384,32768)][int]$Context = 16384,
-    [ValidateRange(1024,65535)][int]$OllamaPort = 11435,
-    [ValidateRange(1024,65535)][int]$GatewayPort = 18795
+    [ValidateRange(1024,65535)][int]$OllamaPort = 11435
 )
 . (Join-Path $PSScriptRoot 'Common.ps1')
 $Root = Get-HomeAIPath $Root
@@ -18,16 +16,15 @@ if ($BackupRoot -eq $Root -or $BackupRoot.StartsWith($Root+'\', [StringCompariso
     $Root.StartsWith($BackupRoot+'\', [StringComparison]::OrdinalIgnoreCase)) {
     throw 'The backup root must be outside the HomeAI root.'
 }
-if ($OllamaPort -eq $GatewayPort) { throw 'The model and gateway ports must be different.' }
 $releases = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'releases.json') -Raw | ConvertFrom-Json
 $models = @($releases.mainModel)
 if ($IncludeComparisonModels) { $models += $releases.comparisonModels }
 if ($IncludeFastModel) { $models += $releases.fastModel }
 
 Write-Host "HomeAI setup: $Root; backups: $BackupRoot"
-Write-Host "Main model: $($releases.mainModel); context: $Context; local ports: $OllamaPort / $GatewayPort"
+Write-Host "Main model: $($releases.mainModel); context: $Context; local model port: $OllamaPort"
 Write-Host "Models requested: $($models -join ', ')"
-Write-Host 'Downloads: verified portable Ollama + AMD libraries; optional Node, MinGit, OpenClaw.'
+Write-Host 'Downloads: verified portable Ollama + AMD libraries; Node, MinGit.'
 Write-Host 'No global installs, firewall changes, drive formatting, cloud models, or messaging accounts.'
 Write-Host 'Default initial download is about 20-25 GB; reserve at least 50 GB of free space.'
 if ($PlanOnly) { Write-Host 'PLAN ONLY: no writes, downloads, installs, or process launches.'; return }
@@ -55,7 +52,7 @@ if (Test-Path -LiteralPath $Root) {
 }
 if (Test-Path -LiteralPath $marker) {
     $existing = Get-HomeAISettings $Root
-    if ($existing.context -ne $Context -or $existing.ollamaPort -ne $OllamaPort -or $existing.gatewayPort -ne $GatewayPort -or
+    if ($existing.context -ne $Context -or $existing.ollamaPort -ne $OllamaPort -or
         $existing.backupRoot -ne $BackupRoot) { throw 'Existing setup parameters differ. Use the original parameters; upgrades are deliberate.' }
     & (Join-Path $PSScriptRoot 'Backup-HomeAI.ps1') -Root $Root | Out-Null
 }
@@ -67,14 +64,13 @@ New-Item -ItemType Directory -Path $BackupRoot -Force | Out-Null
 Assert-HomeAIChild (Join-Path $BackupRoot 'probe') $BackupRoot | Out-Null
 $settings = [ordered]@{
     owner='home-ai-kit-v1'; root=$Root; backupRoot=$BackupRoot; context=$Context;
-    ollamaPort=$OllamaPort; gatewayPort=$GatewayPort; mainModel='homeai-main:locked';
+    ollamaPort=$OllamaPort; mainModel='homeai-main:locked';
     sourceMainModel=$releases.mainModel; fastModel='homeai-fast:locked'; nodeVersion=$releases.node.version;
-    ollamaVersion=$releases.ollama.version; openclawVersion=$releases.openclaw.version;
-    openclawInstalled=(-not $SkipOpenClaw); installedAt=(Get-Date).ToUniversalTime().ToString('o')
+    ollamaVersion=$releases.ollama.version;
+    installedAt=(Get-Date).ToUniversalTime().ToString('o')
 }
 if ($existing = Get-Variable -Name existing -ValueOnly -ErrorAction SilentlyContinue) {
     $settings.installedAt = $existing.installedAt
-    if ($SkipOpenClaw -and $existing.openclawInstalled) { $settings.openclawInstalled = $true }
 }
 Write-HomeAIJson $marker $settings
 Write-HomeAIJson (Join-Path $Root 'state\hardware.json') @{cpu=$cpu.Name;ramGiB=$ramGiB;os=$os.Caption;build=$os.BuildNumber;gpus=$gpus}
@@ -111,13 +107,11 @@ $ProgressPreference = 'SilentlyContinue'
 try {
     Install-VerifiedZip $releases.ollama 'ollama' (Join-Path $Root 'runtime\ollama')
     Install-VerifiedZip $releases.ollamaAmd 'ollama-amd' (Join-Path $Root 'runtime\ollama')
-    if (-not $SkipOpenClaw) {
-        Install-VerifiedZip $releases.node 'node' (Join-Path $Root 'runtime')
-        Install-VerifiedZip $releases.git 'git' (Join-Path $Root 'runtime\git')
-    }
+    Install-VerifiedZip $releases.node 'node' (Join-Path $Root 'runtime')
+    Install-VerifiedZip $releases.git 'git' (Join-Path $Root 'runtime\git')
 } finally { $ProgressPreference = $savedProgress }
 Set-HomeAIEnvironment $settings
-& (Join-Path $PSScriptRoot 'Start-HomeAI.ps1') -Root $Root -ModelsOnly
+& (Join-Path $PSScriptRoot 'Start-HomeAI.ps1') -Root $Root
 $ollamaExe = Join-Path $Root 'runtime\ollama\ollama.exe'
 foreach ($model in $models) {
     $installed = @( (Get-HomeAIOllama $settings '/api/tags').models | Where-Object { $_.name -eq $model } )
@@ -149,35 +143,6 @@ if (-not (Test-Path -LiteralPath (Join-Path $Root 'workspace\MEMORY.md'))) {
     [IO.File]::WriteAllText((Join-Path $Root 'workspace\MEMORY.md'), 'Initial preferences: local inference by default; hosted prompts permitted through configured subscription bridges; approval before messages, purchases, publishing and other external actions; backup before project deletion. Assistive hardware integration is a later stage.')
 }
 
-if (-not $SkipOpenClaw) {
-    $packagePath = Join-Path $Root 'runtime\openclaw\node_modules\openclaw\package.json'
-    $needInstall = -not (Test-Path -LiteralPath $packagePath)
-    if (-not $needInstall) {
-        $package = Get-Content -LiteralPath $packagePath -Raw | ConvertFrom-Json
-        $needInstall = $package.version -ne $releases.openclaw.version
-    }
-    if ($needInstall) {
-        $npm = Join-Path $Root "runtime\node-v$($releases.node.version)-win-x64\npm.cmd"
-        Invoke-HomeAINative $npm @('install','--prefix',(Join-Path $Root 'runtime\openclaw'),
-            '--save-exact',"openclaw@$($releases.openclaw.version)",'--no-audit','--no-fund')
-    }
-    $state = Join-Path $Root 'state\openclaw'
-    New-Item -ItemType Directory -Path $state -Force | Out-Null
-    $configPath = Join-Path $state 'openclaw.json'
-    if (-not (Test-Path -LiteralPath $configPath)) {
-        $tokenBytes = New-Object byte[] 32
-        $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
-        try { $rng.GetBytes($tokenBytes) } finally { $rng.Dispose() }
-        $token = [Convert]::ToBase64String($tokenBytes)
-        $config = New-HomeAIConfig $settings $token
-        Write-HomeAIJson $configPath $config
-    } else { Write-Host 'Existing OpenClaw configuration preserved; reruns do not widen permissions.' }
-    $node = Get-HomeAINode $settings
-    $claw = Get-HomeAIOpenClaw $settings
-    Invoke-HomeAINative $node @($claw,'config','validate')
-    # Apply deny-all while offline. This is a separate host execution policy, not a prompt.
-    Invoke-HomeAINative $node @($claw,'exec-policy','preset','deny-all')
-}
 Write-Host 'Checking a real local completion; this can take several minutes on first load...'
 $result = Send-HomeAIOllama $settings '/api/chat' @{
     model=$settings.mainModel;stream=$false;think=$false;
